@@ -226,6 +226,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument("--cases", nargs="+", choices=PROMPTS, default=list(PROMPTS))
     parser.add_argument("--seed", type=int, default=20260713)
+    parser.add_argument("--t3-dtype", choices=("float32", "bfloat16"), default="float32")
     return parser.parse_args()
 
 
@@ -236,6 +237,11 @@ def main() -> None:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     model = ChatterboxTTS.from_pretrained(device="cuda")
+    if args.t3_dtype == "bfloat16":
+        if not torch.cuda.is_bf16_supported():
+            raise RuntimeError("The selected CUDA device does not support bfloat16")
+        model.t3.to(dtype=torch.bfloat16)
+        model.conds.t3.to(dtype=torch.bfloat16)
 
     # The upstream progress bar writes once per generated token and perturbs CPU loop timing.
     t3_module.tqdm = lambda iterable, *unused_args, **unused_kwargs: iterable
@@ -259,6 +265,7 @@ def main() -> None:
             "warmups": args.warmups,
             "runs": args.runs,
             "base_seed": args.seed,
+            "t3_dtype": args.t3_dtype,
             "sampling": {
                 "repetition_penalty": 1.2,
                 "min_p": 0.05,
