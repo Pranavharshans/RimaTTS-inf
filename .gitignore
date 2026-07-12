@@ -46,3 +46,6 @@ checkpoints/
 
 # Ignore generated sample .wav files
 **/*.wav
+
+# Local benchmark artifacts (summaries are copied into exp.md).
+benchmark_results/
