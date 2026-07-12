@@ -244,6 +244,7 @@ class T3(nn.Module):
         length_penalty=1.0,
         repetition_penalty=1.2,
         cfg_weight=0.5,
+        tf32_after_tokens: Optional[int] = None,
     ):
         """
         Args:
@@ -334,56 +335,69 @@ class T3(nn.Module):
         # Initialize kv_cache with the full context.
         past = output.past_key_values
 
+        if tf32_after_tokens is not None and tf32_after_tokens < 1:
+            raise ValueError("tf32_after_tokens must be positive")
+        original_matmul_precision = (
+            torch.get_float32_matmul_precision() if tf32_after_tokens is not None else None
+        )
+
         # ---- Generation Loop using kv_cache ----
-        for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
-            logits_step = output.logits[:, -1, :]
-            # CFG combine  → (1, V)
-            cond   = logits_step[0:1, :]
-            uncond = logits_step[1:2, :]
-            cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
-            logits = cond + cfg * (cond - uncond)
-            
-            # Apply repetition penalty
-            ids_for_proc = generated_ids[:1, ...]   # batch = 1
-            logits = repetition_penalty_processor(ids_for_proc, logits)  # expects (B,V)
-            
-            # Apply temperature scaling.
-            if temperature != 1.0:
-                logits = logits / temperature
-                
-            # Apply min_p and top_p filtering
-            logits = min_p_warper(ids_for_proc, logits)
-            logits = top_p_warper(ids_for_proc, logits)
+        try:
+            for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
+                logits_step = output.logits[:, -1, :]
+                # CFG combine  → (1, V)
+                cond   = logits_step[0:1, :]
+                uncond = logits_step[1:2, :]
+                cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
+                logits = cond + cfg * (cond - uncond)
 
-            # Convert logits to probabilities and sample the next token.
-            probs = torch.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)  # shape: (B, 1)
+                # Apply repetition penalty
+                ids_for_proc = generated_ids[:1, ...]   # batch = 1
+                logits = repetition_penalty_processor(ids_for_proc, logits)  # expects (B,V)
 
-            predicted.append(next_token)
-            generated_ids = torch.cat([generated_ids, next_token], dim=1)
+                # Apply temperature scaling.
+                if temperature != 1.0:
+                    logits = logits / temperature
 
-            # Check for EOS token.
-            if next_token.view(-1) == self.hp.stop_speech_token:
-                logger.info(f"✅ EOS token detected! Stopping generation at step {i+1}")
-                break
+                # Apply min_p and top_p filtering
+                logits = min_p_warper(ids_for_proc, logits)
+                logits = top_p_warper(ids_for_proc, logits)
 
-            # Get embedding for the new token.
-            next_token_embed = self.speech_emb(next_token)
-            next_token_embed = next_token_embed + self.speech_pos_emb.get_fixed_embedding(i + 1)
+                # Convert logits to probabilities and sample the next token.
+                probs = torch.softmax(logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)  # shape: (B, 1)
 
-            #  For CFG
-            next_token_embed = torch.cat([next_token_embed, next_token_embed])
+                predicted.append(next_token)
+                generated_ids = torch.cat([generated_ids, next_token], dim=1)
 
-            # Forward pass with only the new token and the cached past.
-            output = self.patched_model(
-                inputs_embeds=next_token_embed,
-                past_key_values=past,
-                output_attentions=False,
-                output_hidden_states=True,
-                return_dict=True,
-            )
-            # Update the kv_cache.
-            past = output.past_key_values
+                # Check for EOS token.
+                if next_token.view(-1) == self.hp.stop_speech_token:
+                    logger.info(f"✅ EOS token detected! Stopping generation at step {i+1}")
+                    break
+
+                # Get embedding for the new token.
+                next_token_embed = self.speech_emb(next_token)
+                next_token_embed = next_token_embed + self.speech_pos_emb.get_fixed_embedding(i + 1)
+
+                #  For CFG
+                next_token_embed = torch.cat([next_token_embed, next_token_embed])
+
+                if tf32_after_tokens is not None and i + 1 == tf32_after_tokens:
+                    torch.set_float32_matmul_precision("high")
+
+                # Forward pass with only the new token and the cached past.
+                output = self.patched_model(
+                    inputs_embeds=next_token_embed,
+                    past_key_values=past,
+                    output_attentions=False,
+                    output_hidden_states=True,
+                    return_dict=True,
+                )
+                # Update the kv_cache.
+                past = output.past_key_values
+        finally:
+            if original_matmul_precision is not None:
+                torch.set_float32_matmul_precision(original_matmul_precision)
 
         # Concatenate all predicted tokens along the sequence dimension.
         predicted_tokens = torch.cat(predicted, dim=1)  # shape: (B, num_tokens)

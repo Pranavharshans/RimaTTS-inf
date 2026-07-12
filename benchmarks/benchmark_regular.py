@@ -80,15 +80,12 @@ class TimedModel:
         self.model = model
         self.t3_matmul_precision = t3_matmul_precision
         self.t3_tf32_after_tokens = t3_tf32_after_tokens
-        self._tfmr_decode_calls = 0
         self.metrics: dict[str, Any] = {}
         self._t3_inference = model.t3.inference
-        self._tfmr_forward = model.t3.tfmr.forward
         self._s3gen_inference = model.s3gen.inference
         self._apply_watermark = model.watermarker.apply_watermark
 
         model.t3.inference = self._timed_t3
-        model.t3.tfmr.forward = self._adaptive_tfmr_forward
         model.s3gen.inference = self._timed_s3gen
         model.watermarker.apply_watermark = self._timed_watermark
 
@@ -97,7 +94,6 @@ class TimedModel:
 
     def close(self) -> None:
         self.model.t3.inference = self._t3_inference
-        self.model.t3.tfmr.forward = self._tfmr_forward
         self.model.s3gen.inference = self._s3gen_inference
         self.model.watermarker.apply_watermark = self._apply_watermark
 
@@ -106,7 +102,6 @@ class TimedModel:
         original_matmul_precision = torch.get_float32_matmul_precision()
         ttft_ms: float | None = None
 
-        self._tfmr_decode_calls = 0
         torch.set_float32_matmul_precision(self.t3_matmul_precision)
         synchronize()
         started = time.perf_counter()
@@ -121,6 +116,8 @@ class TimedModel:
 
         torch.multinomial = timed_multinomial
         try:
+            if self.t3_tf32_after_tokens is not None:
+                kwargs["tf32_after_tokens"] = self.t3_tf32_after_tokens
             tokens = self._t3_inference(*args, **kwargs)
         finally:
             torch.multinomial = original_multinomial
@@ -131,17 +128,6 @@ class TimedModel:
         self.metrics["ttft_ms"] = ttft_ms
         self.metrics["tokens"] = tokens.detach()
         return tokens
-
-    def _adaptive_tfmr_forward(self, *args: Any, **kwargs: Any) -> Any:
-        inputs_embeds = kwargs.get("inputs_embeds")
-        if inputs_embeds is not None and inputs_embeds.shape[1] == 1:
-            self._tfmr_decode_calls += 1
-            if (
-                self.t3_tf32_after_tokens is not None
-                and self._tfmr_decode_calls >= self.t3_tf32_after_tokens
-            ):
-                torch.set_float32_matmul_precision("high")
-        return self._tfmr_forward(*args, **kwargs)
 
     def _timed_s3gen(self, *args: Any, **kwargs: Any) -> Any:
         synchronize()
