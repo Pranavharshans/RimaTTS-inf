@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from collections import Counter
 from pathlib import Path
@@ -110,6 +111,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--text", default=DEFAULT_TEXT)
     parser.add_argument("--output-dir", type=Path, default=Path("benchmark_results/profile_baseline"))
     parser.add_argument("--seed", type=int, default=20260713)
+    parser.add_argument("--profile-memory", action="store_true")
     return parser.parse_args()
 
 
@@ -144,7 +146,16 @@ def main() -> None:
     model.t3.tfmr.forward = capture_forward
     try:
         torch.manual_seed(args.seed)
-        model.t3.inference(t3_cond=model.conds.t3, text_tokens=text_tokens, max_new_tokens=1000)
+        model.t3.inference(
+            t3_cond=model.conds.t3,
+            text_tokens=text_tokens,
+            max_new_tokens=1000,
+            temperature=0.8,
+            top_p=1.0,
+            min_p=0.05,
+            repetition_penalty=1.2,
+            cfg_weight=0.5,
+        )
         torch.cuda.synchronize()
 
         cache_snapshots.clear()
@@ -153,13 +164,18 @@ def main() -> None:
         with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
             record_shapes=False,
-            profile_memory=True,
+            profile_memory=args.profile_memory,
             with_stack=False,
         ) as profiler:
             tokens = model.t3.inference(
                 t3_cond=model.conds.t3,
                 text_tokens=text_tokens,
                 max_new_tokens=1000,
+                temperature=0.8,
+                top_p=1.0,
+                min_p=0.05,
+                repetition_penalty=1.2,
+                cfg_weight=0.5,
             )
             torch.cuda.synchronize()
     finally:
@@ -173,18 +189,18 @@ def main() -> None:
                 {
                     "name": event.key,
                     "calls": int(event.count),
-                    "self_cuda_ms": event_value(event, "self_cuda_time_total") / 1000.0,
-                    "cuda_total_ms": event_value(event, "cuda_time_total") / 1000.0,
+                    "self_cuda_ms": event_value(event, "self_device_time_total") / 1000.0,
+                    "cuda_total_ms": event_value(event, "device_time_total") / 1000.0,
                     "self_cpu_ms": event_value(event, "self_cpu_time_total") / 1000.0,
                     "cpu_total_ms": event_value(event, "cpu_time_total") / 1000.0,
-                    "self_cuda_memory_mib": event_value(event, "self_cuda_memory_usage") / 2**20,
+                    "self_cuda_memory_mib": event_value(event, "self_device_memory_usage") / 2**20,
                 }
             )
     selected.sort(key=lambda item: item["self_cuda_ms"], reverse=True)
 
     payload = {
         "generated_tokens": int(tokens.shape[-1]),
-        "token_sha256": __import__("hashlib").sha256(
+        "token_sha256": hashlib.sha256(
             tokens.detach().cpu().to(torch.int64).contiguous().numpy().tobytes()
         ).hexdigest(),
         "sdp_backends": {
