@@ -262,3 +262,26 @@ its prefix is a non-contiguous view with full-capacity strides; slower attention
 access outweighs the removed copies. Peak allocation increases by 450 MiB on
 short and 256 MiB on long. A useful future fixed cache therefore needs a paged
 attention kernel designed for its layout, not an eager SDPA view.
+
+### EXP-008: Hugging Face/Liger fused RMSNorm kernel
+
+- Code change: none. Runtime-only dependency experiment.
+- First attempt: `kernels==0.16.0` failed during Transformers import because its
+  `LayerRepository` API now requires a revision or version, while Transformers
+  5.2's built-in RMSNorm mapping does not provide one.
+- Corrected runtime: `kernels==0.10.5`, matching Transformers 5.2's declared
+  `kernels>=0.10.2,<0.11` range.
+- Workload: one short warmup and one timed short run, using EXP-006 plus adaptive
+  TF32 after token 192.
+- Result: rejected after the smoke benchmark; the regression is too large to
+  justify a full three-case run. The runtime package was removed afterward.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short smoke | 3555.30 | 53.91 | 2696.63 | 833.39 | 2.200 | 1.6160 | 56 | 20.77 | 3164.9 |
+
+The token hash is the exact EXP-000 short reference,
+`22c2f704d30e1070065f4331ccdc77fca479fa5453511c7785be8604c17ca76c`.
+Compared with EXP-006, T3 increased from 1888.26 ms to 2696.63 ms. The fused
+kernel's launch path does not amortize for batch-2, one-token decoder rows on
+this RTX 3090, so no dependency or model change was retained.
