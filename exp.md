@@ -62,3 +62,45 @@ Observations:
 
 Raw samples, audio, and token references are stored on the benchmark machine
 under `benchmark_results/baseline/`.
+
+### EXP-001: T3 kernel and KV-cache profile
+
+- Profiler commits: `be758a1`, corrected sampling in `5cdc4de`.
+- Workload: warmed short prompt, T3 only, 56 generated speech tokens.
+- Quality check: token hash
+  `22c2f704d30e1070065f4331ccdc77fca479fa5453511c7785be8604c17ca76c`
+  exactly matches EXP-000.
+- Result: diagnostic accepted; no model behavior changed.
+
+Runtime findings:
+
+- All 292 T3 parameter tensors and both buffers are FP32, occupying 2030.96 MiB.
+- The cache is a 30-layer FP32 `DynamicCache`. First-layer K and V each have
+  shape `[2, 16, sequence, 64]`, are contiguous, and grow by one position on
+  every decode step.
+- Although all SDP backends are enabled, decode selects
+  `aten::_scaled_dot_product_efficient_attention` with the FP32 CUTLASS FMHA
+  kernel. It does not select Flash Attention.
+- The short profile contains 11,817 matrix multiplications, 1,682 attention
+  calls, and 6,894 `aten::cat` calls.
+
+| Operator group | Calls | CUDA total ms | Self CUDA ms | CPU total ms | Share of measured self CUDA |
+|---|---:|---:|---:|---:|---:|
+| Matrix multiplication (`aten::mm`) | 11,817 | 230.76 | 230.70 | 640.37 | 60.1% |
+| Efficient attention forward | 1,682 | 42.55 | 42.55 | 82.55 | 11.1% |
+| Dynamic-cache concatenation (`aten::cat`) | 6,894 | 22.99 | 22.99 | 192.91 | 6.0% |
+| Sampling (`aten::multinomial`) | 56 | 1.85 | 0.00 | 23.83 | 0.5% total CUDA |
+| Top-k internals used by min-p processing | 56 | 1.58 | 1.58 | 1.87 | 0.4% |
+
+The memory-enabled capture attributed 2.38 GiB of cumulative CUDA allocation to
+`aten::cat` even for the short case. Profiler execution time is intentionally not
+used as a latency benchmark because operator tracing adds heavy CPU overhead.
+
+The first diagnostic capture accidentally used T3's internal `top_p=0.95`
+default. Its kernel and cache findings were the same, but its token hash was
+excluded. The corrected capture explicitly uses the public API's `top_p=1.0`
+and all other EXP-000 sampling values.
+
+Next action: test BF16 T3 execution first. This targets the dominant FP32
+matmuls, halves KV bandwidth, and should make SDPA eligible for the native Flash
+Attention kernel. Static KV allocation remains the next independent target.
