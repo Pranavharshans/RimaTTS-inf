@@ -104,3 +104,32 @@ and all other EXP-000 sampling values.
 Next action: test BF16 T3 execution first. This targets the dominant FP32
 matmuls, halves KV bandwidth, and should make SDPA eligible for the native Flash
 Attention kernel. Static KV allocation remains the next independent target.
+
+### EXP-002: cast the complete T3 path to BF16
+
+- Benchmark-mode commit: `d6fcd30`.
+- Change: cast T3 parameters and T3 conditioning tensors to BF16 after model
+  loading. S3Gen, vocoder, public sampling values, and watermark stayed FP32 and
+  unchanged.
+- Runs: two warmups and five measured runs per prompt.
+- Result: rejected as the default runtime path.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 2673.07 +/- 65.64 | 48.05 +/- 7.21 | 1975.89 +/- 61.85 | 670.58 +/- 5.49 | 1.880 | 1.4218 +/- 0.0349 | 48 | 24.31 +/- 0.73 | 2140.9 |
+| Medium | 7461.18 +/- 67.41 | 46.96 +/- 1.31 | 6700.33 +/- 59.17 | 712.02 +/- 14.13 | 6.440 | 1.1586 +/- 0.0105 | 162 | 24.18 +/- 0.21 | 2196.4 |
+| Long | 21199.14 +/- 465.01 | 44.50 +/- 1.58 | 20069.99 +/- 468.41 | 1015.20 +/- 1.34 | 19.800 | 1.0707 +/- 0.0235 | 496 | 24.72 +/- 0.58 | 2490.8 |
+
+Fixed-seed speech-token hashes:
+
+- Short: `f7986ddd67e759b84c0ab25db0280769690753a6fb83c714cbe20c0d98eb8d72`
+- Medium: `d37a9b8a0ab4f4f247705b4aa5b86ee9e4e91e648e4cf0a47aa7071a5fdaff4d`
+- Long: `bdeab4b72e8afb9adaa3364975636542d70c073101bd35df6f59e0bd05d0709e`
+
+BF16 reduced peak allocated memory by roughly 1 GiB and improved long-sequence
+throughput, where KV bandwidth is expensive. It was slower for the identical
+162-token medium workload: T3 increased from 5876.48 ms at 27.58 tokens/s to
+6700.33 ms at 24.18 tokens/s. Short throughput also fell from 27.87 to 24.31
+tokens/s. All three token hashes changed, and the short output stopped at 48
+tokens instead of 56. The long-only speedup therefore does not justify a default
+precision change without a separate perceptual-quality qualification.
