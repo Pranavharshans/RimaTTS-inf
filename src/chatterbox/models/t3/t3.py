@@ -86,6 +86,7 @@ class T3(nn.Module):
         self.compiled = False
         self.patched_model = None
         self._compiled_decode_callable = None
+        self._compile_rotary_disabled = False
 
     @property
     def device(self):
@@ -338,6 +339,13 @@ class T3(nn.Module):
         past = output.past_key_values
         cfg = torch.as_tensor(cfg_weight, device=output.logits.device, dtype=output.logits.dtype)
         if compile_decode and self._compiled_decode_callable is None:
+            if not self._compile_rotary_disabled:
+                self.tfmr.rotary_emb.forward = torch.compiler.disable(
+                    self.tfmr.rotary_emb.forward,
+                    recursive=False,
+                    reason="RoPE buffer capture is incompatible with dynamic T3 decode",
+                )
+                self._compile_rotary_disabled = True
             self._compiled_decode_callable = torch.compile(
                 self.patched_model.forward,
                 dynamic=True,
