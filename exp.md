@@ -184,3 +184,30 @@ from 23701.25 ms to 18942.96 ms. However, wrapping every transformer forward in
 an additional Python function increased short T3 time from 2009.22 ms to
 2071.19 ms. EXP-005 moves the one-time switch directly into the existing token
 loop to remove that prototype overhead.
+
+### EXP-005: adaptive TF32 after 192 tokens, direct T3 loop
+
+- Implementation commit: `855eb19`.
+- Change: add an optional `tf32_after_tokens` policy directly to
+  `T3.inference()`. The loop switches matmul precision once, after token 192,
+  and restores the caller's original precision in `finally`.
+- Runs: two warmups and five measured runs per prompt.
+- Result: retained. All fixed-seed token hashes exactly match EXP-000.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 2701.77 +/- 132.86 | 40.93 +/- 1.58 | 2027.07 +/- 119.40 | 649.48 +/- 29.39 | 2.200 | 1.2281 +/- 0.0604 | 56 | 27.70 +/- 1.56 | 3165.4 |
+| Medium | 6491.25 +/- 53.04 | 46.51 +/- 11.59 | 5765.98 +/- 54.80 | 671.95 +/- 4.41 | 6.440 | 1.0080 +/- 0.0082 | 162 | 28.10 +/- 0.27 | 3245.8 |
+| Long | 18658.39 +/- 296.71 | 45.76 +/- 0.56 | 17512.40 +/- 283.32 | 1011.87 +/- 1.07 | 19.640 | 0.9500 +/- 0.0151 | 492 | 28.10 +/- 0.45 | 3500.2 |
+
+Exact-token references:
+
+- Short: `22c2f704d30e1070065f4331ccdc77fca479fa5453511c7785be8604c17ca76c`
+- Medium: `63b826922acf7cb3b23cecabf6b1000512b8bb5e3461bb04100a89b33a136f60`
+- Long: `b4a4420291d6207626df144d57c8cff2e7caf2efbe37cd49ed17d65813b9f1c6`
+
+Compared with EXP-000, long T3 time fell from 23701.25 ms to 17512.40 ms
+and long end-to-end time fell from 24876.00 ms to 18658.39 ms. Medium T3
+also fell from 5876.48 ms to 5765.98 ms. Short is statistically close to the
+baseline and follows the same arithmetic path because it never reaches the
+threshold. This is retained as the current best exact-token implementation.
