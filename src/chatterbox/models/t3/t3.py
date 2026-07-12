@@ -85,7 +85,7 @@ class T3(nn.Module):
         self.speech_head = nn.Linear(self.cfg.hidden_size, hp.speech_tokens_dict_size, bias=self.is_gpt)
         self.compiled = False
         self.patched_model = None
-        self._compiled_decode_callable = None
+        self._compiled_decode_callables = {}
         self._compile_rotary_disabled = False
 
     @property
@@ -249,6 +249,7 @@ class T3(nn.Module):
         cfg_weight=0.5,
         tf32_after_tokens: Optional[int] = None,
         compile_decode: bool = False,
+        compile_mode: str = "default",
     ):
         """
         Args:
@@ -338,7 +339,9 @@ class T3(nn.Module):
         # Initialize kv_cache with the full context.
         past = output.past_key_values
         cfg = torch.as_tensor(cfg_weight, device=output.logits.device, dtype=output.logits.dtype)
-        if compile_decode and self._compiled_decode_callable is None:
+        if compile_decode and compile_mode not in self._compiled_decode_callables:
+            if compile_mode not in {"default", "reduce-overhead", "max-autotune-no-cudagraphs"}:
+                raise ValueError(f"Unsupported compile_mode: {compile_mode}")
             if not self._compile_rotary_disabled:
                 self.tfmr.rotary_emb.forward = torch.compiler.disable(
                     self.tfmr.rotary_emb.forward,
@@ -346,14 +349,16 @@ class T3(nn.Module):
                     reason="RoPE buffer capture is incompatible with dynamic T3 decode",
                 )
                 self._compile_rotary_disabled = True
-            self._compiled_decode_callable = torch.compile(
+            self._compiled_decode_callables[compile_mode] = torch.compile(
                 self.patched_model.forward,
                 dynamic=True,
                 fullgraph=False,
-                mode="default",
+                mode=compile_mode,
             )
         decode_forward = (
-            self._compiled_decode_callable if compile_decode else self.patched_model.forward
+            self._compiled_decode_callables[compile_mode]
+            if compile_decode
+            else self.patched_model.forward
         )
 
         if tf32_after_tokens is not None and tf32_after_tokens < 1:

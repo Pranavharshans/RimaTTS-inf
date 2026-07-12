@@ -77,11 +77,13 @@ class TimedModel:
         t3_matmul_precision: str,
         t3_tf32_after_tokens: int | None,
         compile_t3_decode: bool,
+        t3_compile_mode: str,
     ):
         self.model = model
         self.t3_matmul_precision = t3_matmul_precision
         self.t3_tf32_after_tokens = t3_tf32_after_tokens
         self.compile_t3_decode = compile_t3_decode
+        self.t3_compile_mode = t3_compile_mode
         self.metrics: dict[str, Any] = {}
         self._t3_inference = model.t3.inference
         self._s3gen_inference = model.s3gen.inference
@@ -121,6 +123,7 @@ class TimedModel:
             if self.t3_tf32_after_tokens is not None:
                 kwargs["tf32_after_tokens"] = self.t3_tf32_after_tokens
             kwargs["compile_decode"] = self.compile_t3_decode
+            kwargs["compile_mode"] = self.t3_compile_mode
             tokens = self._t3_inference(*args, **kwargs)
         finally:
             torch.multinomial = original_multinomial
@@ -245,6 +248,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--t3-matmul-precision", choices=("highest", "high"), default="highest")
     parser.add_argument("--t3-tf32-after-tokens", type=int)
     parser.add_argument("--compile-t3-decode", action="store_true")
+    parser.add_argument(
+        "--t3-compile-mode",
+        choices=("default", "reduce-overhead", "max-autotune-no-cudagraphs"),
+        default="default",
+    )
     return parser.parse_args()
 
 
@@ -270,6 +278,7 @@ def main() -> None:
         t3_matmul_precision=args.t3_matmul_precision,
         t3_tf32_after_tokens=args.t3_tf32_after_tokens,
         compile_t3_decode=args.compile_t3_decode,
+        t3_compile_mode=args.t3_compile_mode,
     )
 
     payload: dict[str, Any] = {
@@ -294,6 +303,7 @@ def main() -> None:
             "t3_matmul_precision": args.t3_matmul_precision,
             "t3_tf32_after_tokens": args.t3_tf32_after_tokens,
             "compile_t3_decode": args.compile_t3_decode,
+            "t3_compile_mode": args.t3_compile_mode,
             "sampling": {
                 "repetition_penalty": 1.2,
                 "min_p": 0.05,
