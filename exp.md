@@ -161,3 +161,26 @@ the complete sampled sequence. Short T3 increased from 2009.22 ms to 2135.90
 ms, and medium increased from 5876.48 ms to 6104.00 ms. The next experiment
 will retain `highest` precision for early decode and switch to TF32 only after
 the sequence is long enough for its faster kernel path to amortize overhead.
+
+### EXP-004: adaptive TF32 after 192 tokens, forward-wrapper prototype
+
+- Benchmark prototype commit: `942634b`.
+- Change: keep `highest` FP32 matmuls for prefill and the first 192 generated
+  tokens, then use TF32 for later T3 transformer forwards. Restore `highest`
+  before S3Gen.
+- Runs: two warmups and five measured runs per prompt.
+- Result: exact-token policy accepted; Python forward-wrapper implementation
+  superseded because it adds measurable short-request overhead.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 2769.90 +/- 37.34 | 44.12 +/- 1.89 | 2071.19 +/- 39.06 | 671.15 +/- 16.08 | 2.200 | 1.2590 +/- 0.0170 | 56 | 27.05 +/- 0.51 | 3165.4 |
+| Medium | 6694.25 +/- 67.89 | 44.53 +/- 0.75 | 5954.21 +/- 61.01 | 690.52 +/- 14.67 | 6.440 | 1.0395 +/- 0.0105 | 162 | 27.21 +/- 0.28 | 3245.8 |
+| Long | 20102.63 +/- 16.99 | 46.72 +/- 1.04 | 18942.96 +/- 20.74 | 1017.67 +/- 3.47 | 19.640 | 1.0236 +/- 0.0009 | 492 | 25.97 +/- 0.03 | 3500.2 |
+
+All three fixed-seed token hashes exactly match EXP-000. The 192-token policy
+keeps short and medium on the original arithmetic path and reduces long T3 time
+from 23701.25 ms to 18942.96 ms. However, wrapping every transformer forward in
+an additional Python function increased short T3 time from 2009.22 ms to
+2071.19 ms. EXP-005 moves the one-time switch directly into the existing token
+loop to remove that prototype overhead.
