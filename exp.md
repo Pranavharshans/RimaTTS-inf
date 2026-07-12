@@ -211,3 +211,30 @@ and long end-to-end time fell from 24876.00 ms to 18658.39 ms. Medium T3
 also fell from 5876.48 ms to 5765.98 ms. Short is statistically close to the
 baseline and follows the same arithmetic path because it never reaches the
 threshold. This is retained as the current best exact-token implementation.
+
+### EXP-006: remove T3 loop allocation and unused outputs
+
+- Implementation commit: `a62edc4`.
+- Change: reuse `T3HuggingfaceBackend`, request only the transformer's final
+  hidden state, preallocate generated-token storage, and create the CFG scalar
+  once. EXP-005's adaptive TF32 policy remains enabled after token 192.
+- Runs: two warmups and five measured runs per prompt.
+- Result: retained. All fixed-seed token hashes exactly match EXP-000.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 2571.13 +/- 17.86 | 40.17 +/- 1.48 | 1888.26 +/- 9.96 | 651.85 +/- 15.25 | 2.200 | 1.1687 +/- 0.0081 | 56 | 29.66 +/- 0.16 | 3164.9 |
+| Medium | 6169.17 +/- 57.57 | 39.74 +/- 1.27 | 5469.44 +/- 61.93 | 650.51 +/- 7.40 | 6.440 | 0.9579 +/- 0.0089 | 162 | 29.62 +/- 0.33 | 3245.2 |
+| Long | 18515.39 +/- 600.11 | 45.52 +/- 1.02 | 17367.73 +/- 602.83 | 1014.96 +/- 2.92 | 19.640 | 0.9427 +/- 0.0306 | 492 | 28.36 +/- 0.98 | 3500.2 |
+
+Exact-token references remain:
+
+- Short: `22c2f704d30e1070065f4331ccdc77fca479fa5453511c7785be8604c17ca76c`
+- Medium: `63b826922acf7cb3b23cecabf6b1000512b8bb5e3461bb04100a89b33a136f60`
+- Long: `b4a4420291d6207626df144d57c8cff2e7caf2efbe37cd49ed17d65813b9f1c6`
+
+Compared with EXP-005, T3 fell from 2027.07 to 1888.26 ms on short and
+from 5765.98 to 5469.44 ms on medium. Compared with the untouched baseline,
+long T3 is 6333.52 ms lower. Medium and long are now faster than real time;
+short remains above real time because the fixed 652 ms S3Gen cost is a larger
+share of its 2.2-second output.
