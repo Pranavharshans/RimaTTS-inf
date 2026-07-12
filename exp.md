@@ -133,3 +133,31 @@ throughput, where KV bandwidth is expensive. It was slower for the identical
 tokens/s. All three token hashes changed, and the short output stopped at 48
 tokens instead of 56. The long-only speedup therefore does not justify a default
 precision change without a separate perceptual-quality qualification.
+
+### EXP-003: T3-only TF32 matmul precision
+
+- Benchmark-mode commit: `f1bbd61`.
+- Change: set `torch.set_float32_matmul_precision("high")` only while T3 runs,
+  then restore `highest` before S3Gen. Parameters, activations, KV cache, S3Gen,
+  sampling, and watermark remain FP32.
+- Runs: two warmups and five measured runs per prompt.
+- Result: accepted as an exact-token long-sequence candidate, rejected as an
+  unconditional default because short and medium latency regressed.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 2837.34 +/- 46.30 | 42.93 +/- 1.08 | 2135.90 +/- 40.88 | 673.74 +/- 12.25 | 2.200 | 1.2897 +/- 0.0210 | 56 | 26.23 +/- 0.50 | 3165.4 |
+| Medium | 6842.07 +/- 128.54 | 51.88 +/- 16.72 | 6104.00 +/- 113.78 | 685.21 +/- 19.80 | 6.440 | 1.0624 +/- 0.0200 | 162 | 26.55 +/- 0.50 | 3245.8 |
+| Long | 19379.95 +/- 197.45 | 45.10 +/- 1.85 | 18239.34 +/- 183.63 | 1015.36 +/- 1.65 | 19.640 | 0.9868 +/- 0.0101 | 492 | 26.98 +/- 0.27 | 3500.2 |
+
+Every fixed-seed token hash exactly matches EXP-000:
+
+- Short: `22c2f704d30e1070065f4331ccdc77fca479fa5453511c7785be8604c17ca76c`
+- Medium: `63b826922acf7cb3b23cecabf6b1000512b8bb5e3461bb04100a89b33a136f60`
+- Long: `b4a4420291d6207626df144d57c8cff2e7caf2efbe37cd49ed17d65813b9f1c6`
+
+TF32 reduced long T3 time from 23701.25 ms to 18239.34 ms while preserving
+the complete sampled sequence. Short T3 increased from 2009.22 ms to 2135.90
+ms, and medium increased from 5876.48 ms to 6104.00 ms. The next experiment
+will retain `highest` precision for early decode and switch to TF32 only after
+the sequence is long enough for its faster kernel path to amortize overhead.
