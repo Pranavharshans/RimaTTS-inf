@@ -85,6 +85,7 @@ class T3(nn.Module):
         self.speech_head = nn.Linear(self.cfg.hidden_size, hp.speech_tokens_dict_size, bias=self.is_gpt)
         self.compiled = False
         self.patched_model = None
+        self._compiled_decode_callable = None
 
     @property
     def device(self):
@@ -246,6 +247,7 @@ class T3(nn.Module):
         repetition_penalty=1.2,
         cfg_weight=0.5,
         tf32_after_tokens: Optional[int] = None,
+        compile_decode: bool = False,
     ):
         """
         Args:
@@ -335,6 +337,16 @@ class T3(nn.Module):
         # Initialize kv_cache with the full context.
         past = output.past_key_values
         cfg = torch.as_tensor(cfg_weight, device=output.logits.device, dtype=output.logits.dtype)
+        if compile_decode and self._compiled_decode_callable is None:
+            self._compiled_decode_callable = torch.compile(
+                self.patched_model.forward,
+                dynamic=True,
+                fullgraph=False,
+                mode="default",
+            )
+        decode_forward = (
+            self._compiled_decode_callable if compile_decode else self.patched_model.forward
+        )
 
         if tf32_after_tokens is not None and tf32_after_tokens < 1:
             raise ValueError("tf32_after_tokens must be positive")
@@ -386,7 +398,7 @@ class T3(nn.Module):
                     torch.set_float32_matmul_precision("high")
 
                 # Forward pass with only the new token and the cached past.
-                output = self.patched_model(
+                output = decode_forward(
                     inputs_embeds=next_token_embed,
                     past_key_values=past,
                     output_attentions=False,
