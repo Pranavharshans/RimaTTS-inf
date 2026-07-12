@@ -76,10 +76,12 @@ class TimedModel:
         model: ChatterboxTTS,
         t3_matmul_precision: str,
         t3_tf32_after_tokens: int | None,
+        t3_cache: str,
     ):
         self.model = model
         self.t3_matmul_precision = t3_matmul_precision
         self.t3_tf32_after_tokens = t3_tf32_after_tokens
+        self.t3_cache = t3_cache
         self.metrics: dict[str, Any] = {}
         self._t3_inference = model.t3.inference
         self._s3gen_inference = model.s3gen.inference
@@ -118,6 +120,7 @@ class TimedModel:
         try:
             if self.t3_tf32_after_tokens is not None:
                 kwargs["tf32_after_tokens"] = self.t3_tf32_after_tokens
+            kwargs["cache_implementation"] = self.t3_cache
             tokens = self._t3_inference(*args, **kwargs)
         finally:
             torch.multinomial = original_multinomial
@@ -241,6 +244,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--t3-dtype", choices=("float32", "bfloat16"), default="float32")
     parser.add_argument("--t3-matmul-precision", choices=("highest", "high"), default="highest")
     parser.add_argument("--t3-tf32-after-tokens", type=int)
+    parser.add_argument("--t3-cache", choices=("dynamic", "preallocated"), default="dynamic")
     return parser.parse_args()
 
 
@@ -265,6 +269,7 @@ def main() -> None:
         model,
         t3_matmul_precision=args.t3_matmul_precision,
         t3_tf32_after_tokens=args.t3_tf32_after_tokens,
+        t3_cache=args.t3_cache,
     )
 
     payload: dict[str, Any] = {
@@ -288,6 +293,7 @@ def main() -> None:
             "t3_dtype": args.t3_dtype,
             "t3_matmul_precision": args.t3_matmul_precision,
             "t3_tf32_after_tokens": args.t3_tf32_after_tokens,
+            "t3_cache": args.t3_cache,
             "sampling": {
                 "repetition_penalty": 1.2,
                 "min_p": 0.05,

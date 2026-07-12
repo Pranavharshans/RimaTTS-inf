@@ -23,6 +23,7 @@ from .modules.learned_pos_emb import LearnedPositionEmbeddings
 from .modules.cond_enc import T3CondEnc, T3Cond
 from .modules.t3_config import T3Config
 from .llama_configs import LLAMA_CONFIGS
+from .cache import PreallocatedDynamicCache
 from .inference.t3_hf_backend import T3HuggingfaceBackend
 from ..utils import AttrDict
 
@@ -246,6 +247,7 @@ class T3(nn.Module):
         repetition_penalty=1.2,
         cfg_weight=0.5,
         tf32_after_tokens: Optional[int] = None,
+        cache_implementation: str = "dynamic",
     ):
         """
         Args:
@@ -259,6 +261,8 @@ class T3(nn.Module):
         # Default initial speech to a single start-of-speech token
         if initial_speech_tokens is None:
             initial_speech_tokens = self.hp.start_speech_token * torch.ones_like(text_tokens[:, :1])
+        if max_new_tokens is None:
+            max_new_tokens = self.hp.max_speech_tokens
 
         # Prepare custom input embeds
         embeds, len_cond = self.prepare_input_embeds(
@@ -311,9 +315,6 @@ class T3(nn.Module):
         # Combine condition and BOS token for the initial input
         inputs_embeds = torch.cat([embeds, bos_embed], dim=1)
 
-        if max_new_tokens is None:
-            max_new_tokens = self.hp.max_speech_tokens
-
         # Track generated token ids in a fixed buffer to avoid a per-token concat.
         generated_ids = torch.empty((1, max_new_tokens + 1), dtype=torch.long, device=device)
         generated_ids[:, :1].copy_(bos_token)
@@ -324,10 +325,20 @@ class T3(nn.Module):
         min_p_warper = MinPLogitsWarper(min_p=min_p)
         repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=float(repetition_penalty))
 
-        # ---- Initial Forward Pass (no kv_cache yet) ----
+        if cache_implementation == "dynamic":
+            initial_cache = None
+        elif cache_implementation == "preallocated":
+            initial_cache = PreallocatedDynamicCache(
+                config=self.cfg,
+                max_cache_len=inputs_embeds.shape[1] + max_new_tokens,
+            )
+        else:
+            raise ValueError(f"Unknown cache implementation: {cache_implementation}")
+
+        # ---- Initial Forward Pass ----
         output = self.patched_model(
             inputs_embeds=inputs_embeds,
-            past_key_values=None,
+            past_key_values=initial_cache,
             use_cache=True,
             output_attentions=False,
             output_hidden_states=False,
