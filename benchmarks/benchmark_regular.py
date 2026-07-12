@@ -71,8 +71,9 @@ def tensor_sha256(tensor: torch.Tensor) -> str:
 class TimedModel:
     """Install measurement-only wrappers around the existing model methods."""
 
-    def __init__(self, model: ChatterboxTTS):
+    def __init__(self, model: ChatterboxTTS, t3_matmul_precision: str):
         self.model = model
+        self.t3_matmul_precision = t3_matmul_precision
         self.metrics: dict[str, Any] = {}
         self._t3_inference = model.t3.inference
         self._s3gen_inference = model.s3gen.inference
@@ -92,8 +93,10 @@ class TimedModel:
 
     def _timed_t3(self, *args: Any, **kwargs: Any) -> torch.Tensor:
         original_multinomial = torch.multinomial
+        original_matmul_precision = torch.get_float32_matmul_precision()
         ttft_ms: float | None = None
 
+        torch.set_float32_matmul_precision(self.t3_matmul_precision)
         synchronize()
         started = time.perf_counter()
 
@@ -110,6 +113,7 @@ class TimedModel:
             tokens = self._t3_inference(*args, **kwargs)
         finally:
             torch.multinomial = original_multinomial
+            torch.set_float32_matmul_precision(original_matmul_precision)
 
         synchronize()
         self.metrics["t3_ms"] = (time.perf_counter() - started) * 1000.0
@@ -227,6 +231,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cases", nargs="+", choices=PROMPTS, default=list(PROMPTS))
     parser.add_argument("--seed", type=int, default=20260713)
     parser.add_argument("--t3-dtype", choices=("float32", "bfloat16"), default="float32")
+    parser.add_argument("--t3-matmul-precision", choices=("highest", "high"), default="highest")
     return parser.parse_args()
 
 
@@ -245,7 +250,7 @@ def main() -> None:
 
     # The upstream progress bar writes once per generated token and perturbs CPU loop timing.
     t3_module.tqdm = lambda iterable, *unused_args, **unused_kwargs: iterable
-    timed_model = TimedModel(model)
+    timed_model = TimedModel(model, t3_matmul_precision=args.t3_matmul_precision)
 
     payload: dict[str, Any] = {
         "label": args.label,
@@ -266,6 +271,7 @@ def main() -> None:
             "runs": args.runs,
             "base_seed": args.seed,
             "t3_dtype": args.t3_dtype,
+            "t3_matmul_precision": args.t3_matmul_precision,
             "sampling": {
                 "repetition_penalty": 1.2,
                 "min_p": 0.05,
