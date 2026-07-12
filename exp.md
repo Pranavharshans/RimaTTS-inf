@@ -285,3 +285,42 @@ The token hash is the exact EXP-000 short reference,
 Compared with EXP-006, T3 increased from 1888.26 ms to 2696.63 ms. The fused
 kernel's launch path does not amortize for batch-2, one-token decoder rows on
 this RTX 3090, so no dependency or model change was retained.
+
+### EXP-009: compiled T3 decode with eager RoPE
+
+- Implementation commits: `3c9394f`, `b5a3d0f`.
+- Change: compile the repeated transformer decode forward with
+  `torch.compile(dynamic=True, fullgraph=False, mode="default")`. Keep RoPE
+  eager because compiling the rotary embedding buffer fails in TorchInductor
+  with an `UntypedStorage` weak-reference error. EXP-006's loop cleanup and
+  adaptive TF32 after token 192 remain enabled.
+- Runs: two compile/warmup runs and five measured runs per prompt. The first
+  process-level compile took approximately two minutes and is excluded from
+  all measurements.
+- Result: retained as the fastest exact-token implementation so far. All
+  fixed-seed token hashes exactly match EXP-000.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 1701.40 +/- 44.36 | 42.26 +/- 4.74 | 1008.04 +/- 31.68 | 665.62 +/- 17.88 | 2.200 | 0.7734 +/- 0.0202 | 56 | 55.60 +/- 1.73 | 3218.9 |
+| Medium | 3611.79 +/- 81.17 | 41.20 +/- 1.05 | 2863.81 +/- 68.51 | 689.76 +/- 19.81 | 6.440 | 0.5608 +/- 0.0126 | 162 | 56.59 +/- 1.36 | 3376.2 |
+| Long | 10837.73 +/- 142.40 | 45.44 +/- 0.56 | 9706.42 +/- 140.98 | 1018.26 +/- 1.62 | 19.640 | 0.5518 +/- 0.0073 | 492 | 50.70 +/- 0.74 | 3849.0 |
+
+Exact-token references remain:
+
+- Short: `22c2f704d30e1070065f4331ccdc77fca479fa5453511c7785be8604c17ca76c`
+- Medium: `63b826922acf7cb3b23cecabf6b1000512b8bb5e3461bb04100a89b33a136f60`
+- Long: `b4a4420291d6207626df144d57c8cff2e7caf2efbe37cd49ed17d65813b9f1c6`
+
+Compared with the untouched EXP-000 baseline, short T3 falls from 2009.22 ms
+to 1008.04 ms, medium T3 from 5876.48 ms to 2863.81 ms, and long T3 from
+23701.25 ms to 9706.42 ms. End-to-end time falls from 2694.75 ms to 1701.40 ms
+on short, 6617.03 ms to 3611.79 ms on medium, and 24876.00 ms to 10837.73 ms on
+long. TTFT remains approximately 41-45 ms because compilation primarily
+accelerates repeated decode. Peak allocation rises by 53.5 MiB on short,
+131.0 MiB on medium, and 348.8 MiB on long relative to EXP-006.
+
+This path has no checkpoint, sampling, decoder-step, precision, or watermark
+change. Exact sampled speech-token identity across all prompts is the primary
+quality gate. The deployment tradeoff is startup compilation latency and a
+persistent TorchInductor cache, not generated-audio quality.
