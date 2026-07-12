@@ -71,15 +71,24 @@ def tensor_sha256(tensor: torch.Tensor) -> str:
 class TimedModel:
     """Install measurement-only wrappers around the existing model methods."""
 
-    def __init__(self, model: ChatterboxTTS, t3_matmul_precision: str):
+    def __init__(
+        self,
+        model: ChatterboxTTS,
+        t3_matmul_precision: str,
+        t3_tf32_after_tokens: int | None,
+    ):
         self.model = model
         self.t3_matmul_precision = t3_matmul_precision
+        self.t3_tf32_after_tokens = t3_tf32_after_tokens
+        self._tfmr_decode_calls = 0
         self.metrics: dict[str, Any] = {}
         self._t3_inference = model.t3.inference
+        self._tfmr_forward = model.t3.tfmr.forward
         self._s3gen_inference = model.s3gen.inference
         self._apply_watermark = model.watermarker.apply_watermark
 
         model.t3.inference = self._timed_t3
+        model.t3.tfmr.forward = self._adaptive_tfmr_forward
         model.s3gen.inference = self._timed_s3gen
         model.watermarker.apply_watermark = self._timed_watermark
 
@@ -88,6 +97,7 @@ class TimedModel:
 
     def close(self) -> None:
         self.model.t3.inference = self._t3_inference
+        self.model.t3.tfmr.forward = self._tfmr_forward
         self.model.s3gen.inference = self._s3gen_inference
         self.model.watermarker.apply_watermark = self._apply_watermark
 
@@ -96,6 +106,7 @@ class TimedModel:
         original_matmul_precision = torch.get_float32_matmul_precision()
         ttft_ms: float | None = None
 
+        self._tfmr_decode_calls = 0
         torch.set_float32_matmul_precision(self.t3_matmul_precision)
         synchronize()
         started = time.perf_counter()
@@ -120,6 +131,17 @@ class TimedModel:
         self.metrics["ttft_ms"] = ttft_ms
         self.metrics["tokens"] = tokens.detach()
         return tokens
+
+    def _adaptive_tfmr_forward(self, *args: Any, **kwargs: Any) -> Any:
+        inputs_embeds = kwargs.get("inputs_embeds")
+        if inputs_embeds is not None and inputs_embeds.shape[1] == 1:
+            self._tfmr_decode_calls += 1
+            if (
+                self.t3_tf32_after_tokens is not None
+                and self._tfmr_decode_calls >= self.t3_tf32_after_tokens
+            ):
+                torch.set_float32_matmul_precision("high")
+        return self._tfmr_forward(*args, **kwargs)
 
     def _timed_s3gen(self, *args: Any, **kwargs: Any) -> Any:
         synchronize()
@@ -232,6 +254,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=20260713)
     parser.add_argument("--t3-dtype", choices=("float32", "bfloat16"), default="float32")
     parser.add_argument("--t3-matmul-precision", choices=("highest", "high"), default="highest")
+    parser.add_argument("--t3-tf32-after-tokens", type=int)
     return parser.parse_args()
 
 
@@ -250,7 +273,13 @@ def main() -> None:
 
     # The upstream progress bar writes once per generated token and perturbs CPU loop timing.
     t3_module.tqdm = lambda iterable, *unused_args, **unused_kwargs: iterable
-    timed_model = TimedModel(model, t3_matmul_precision=args.t3_matmul_precision)
+    if args.t3_tf32_after_tokens is not None and args.t3_tf32_after_tokens < 1:
+        raise ValueError("--t3-tf32-after-tokens must be positive")
+    timed_model = TimedModel(
+        model,
+        t3_matmul_precision=args.t3_matmul_precision,
+        t3_tf32_after_tokens=args.t3_tf32_after_tokens,
+    )
 
     payload: dict[str, Any] = {
         "label": args.label,
@@ -272,6 +301,7 @@ def main() -> None:
             "base_seed": args.seed,
             "t3_dtype": args.t3_dtype,
             "t3_matmul_precision": args.t3_matmul_precision,
+            "t3_tf32_after_tokens": args.t3_tf32_after_tokens,
             "sampling": {
                 "repetition_penalty": 1.2,
                 "min_p": 0.05,
