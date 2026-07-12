@@ -84,6 +84,7 @@ class T3(nn.Module):
         self.text_head = nn.Linear(self.cfg.hidden_size, hp.text_tokens_dict_size, bias=False)
         self.speech_head = nn.Linear(self.cfg.hidden_size, hp.speech_tokens_dict_size, bias=self.is_gpt)
         self.compiled = False
+        self.patched_model = None
 
     @property
     def device(self):
@@ -270,18 +271,15 @@ class T3(nn.Module):
         # In order to use the standard HF generate method, we need to extend some methods to inject our custom logic
         # Note the llama-specific logic. Other tfmr types can be added later.
 
-        self.compiled = False
-
         # TODO? synchronize the expensive compile function
         # with self.compile_lock:
-        if not self.compiled:
-            patched_model = T3HuggingfaceBackend(
+        if self.patched_model is None:
+            self.patched_model = T3HuggingfaceBackend(
                 config=self.cfg,
                 llama=self.tfmr,
                 speech_enc=self.speech_emb,
                 speech_head=self.speech_head,
             )
-            self.patched_model = patched_model
             self.compiled = True
 
         # # Run normal generate method, which calls our custom extended methods
@@ -313,14 +311,17 @@ class T3(nn.Module):
         # Combine condition and BOS token for the initial input
         inputs_embeds = torch.cat([embeds, bos_embed], dim=1)
 
-        # Track generated token ids; start with the BOS token.
-        generated_ids = bos_token.clone()
-        predicted = []  # To store the predicted tokens
+        if max_new_tokens is None:
+            max_new_tokens = self.hp.max_speech_tokens
+
+        # Track generated token ids in a fixed buffer to avoid a per-token concat.
+        generated_ids = torch.empty((1, max_new_tokens + 1), dtype=torch.long, device=device)
+        generated_ids[:, :1].copy_(bos_token)
+        generated_length = 1
 
         # Instantiate the logits processors.
         top_p_warper = TopPLogitsWarper(top_p=top_p)
         min_p_warper = MinPLogitsWarper(min_p=min_p)
-        top_p_warper = TopPLogitsWarper(top_p=top_p)
         repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=float(repetition_penalty))
 
         # ---- Initial Forward Pass (no kv_cache yet) ----
@@ -329,11 +330,12 @@ class T3(nn.Module):
             past_key_values=None,
             use_cache=True,
             output_attentions=False,
-            output_hidden_states=True,
+            output_hidden_states=False,
             return_dict=True,
         )
         # Initialize kv_cache with the full context.
         past = output.past_key_values
+        cfg = torch.as_tensor(cfg_weight, device=output.logits.device, dtype=output.logits.dtype)
 
         if tf32_after_tokens is not None and tf32_after_tokens < 1:
             raise ValueError("tf32_after_tokens must be positive")
@@ -348,11 +350,10 @@ class T3(nn.Module):
                 # CFG combine  → (1, V)
                 cond   = logits_step[0:1, :]
                 uncond = logits_step[1:2, :]
-                cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
                 logits = cond + cfg * (cond - uncond)
 
                 # Apply repetition penalty
-                ids_for_proc = generated_ids[:1, ...]   # batch = 1
+                ids_for_proc = generated_ids[:, :generated_length]
                 logits = repetition_penalty_processor(ids_for_proc, logits)  # expects (B,V)
 
                 # Apply temperature scaling.
@@ -367,8 +368,8 @@ class T3(nn.Module):
                 probs = torch.softmax(logits, dim=-1)
                 next_token = torch.multinomial(probs, num_samples=1)  # shape: (B, 1)
 
-                predicted.append(next_token)
-                generated_ids = torch.cat([generated_ids, next_token], dim=1)
+                generated_ids[:, generated_length : generated_length + 1].copy_(next_token)
+                generated_length += 1
 
                 # Check for EOS token.
                 if next_token.view(-1) == self.hp.stop_speech_token:
@@ -390,7 +391,7 @@ class T3(nn.Module):
                     inputs_embeds=next_token_embed,
                     past_key_values=past,
                     output_attentions=False,
-                    output_hidden_states=True,
+                    output_hidden_states=False,
                     return_dict=True,
                 )
                 # Update the kv_cache.
@@ -399,9 +400,7 @@ class T3(nn.Module):
             if original_matmul_precision is not None:
                 torch.set_float32_matmul_precision(original_matmul_precision)
 
-        # Concatenate all predicted tokens along the sequence dimension.
-        predicted_tokens = torch.cat(predicted, dim=1)  # shape: (B, num_tokens)
-        return predicted_tokens
+        return generated_ids[:, 1:generated_length]
 
     @torch.inference_mode()
     def inference_turbo(self, t3_cond, text_tokens, temperature=0.8, top_k=1000, top_p=0.95, repetition_penalty=1.2,
