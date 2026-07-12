@@ -238,3 +238,27 @@ from 5765.98 to 5469.44 ms on medium. Compared with the untouched baseline,
 long T3 is 6333.52 ms lower. Medium and long are now faster than real time;
 short remains above real time because the fixed 652 ms S3Gen cost is a larger
 share of its 2.2-second output.
+
+### EXP-007: preallocated dynamic-prefix FP32 KV cache
+
+- Experimental implementation commit: `405f747`.
+- Change: replace per-token dynamic K/V concatenation with fixed-capacity
+  backing tensors and return only each cache's populated prefix. EXP-006 loop
+  cleanup and adaptive TF32 remain enabled.
+- Runs: one short smoke run, then two warmups and five measured runs per prompt.
+- Result: rejected and removed after logging. All token hashes match EXP-000,
+  but every workload is slower and memory use increases.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 2642.48 +/- 41.70 | 40.98 +/- 0.74 | 1962.28 +/- 25.57 | 653.47 +/- 17.26 | 2.200 | 1.2011 +/- 0.0190 | 56 | 28.54 +/- 0.37 | 3614.8 |
+| Medium | 6502.72 +/- 71.64 | 42.50 +/- 2.15 | 5775.35 +/- 70.54 | 677.38 +/- 14.16 | 6.440 | 1.0097 +/- 0.0111 | 162 | 28.05 +/- 0.34 | 3648.6 |
+| Long | 18896.82 +/- 162.30 | 45.64 +/- 0.54 | 17750.54 +/- 160.51 | 1014.39 +/- 1.67 | 19.640 | 0.9622 +/- 0.0083 | 492 | 27.72 +/- 0.25 | 3756.1 |
+
+The smoke run produced the exact short hash but only 26.29 tokens/s. The full
+run warmed to 28.54 tokens/s, still below EXP-006's 29.66. Long throughput also
+fell from 28.36 to 27.72 tokens/s. Although the cache eliminates `aten::cat`,
+its prefix is a non-contiguous view with full-capacity strides; slower attention
+access outweighs the removed copies. Peak allocation increases by 450 MiB on
+short and 256 MiB on long. A useful future fixed cache therefore needs a paged
+attention kernel designed for its layout, not an eager SDPA view.
