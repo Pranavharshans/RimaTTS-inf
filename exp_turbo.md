@@ -687,3 +687,27 @@ difference `0.0`. EXP-T021's five-run long means are `4088.59` ms T3 and
 `152.62` tokens/s, so the fixed buffer does not improve the compiled path.
 The view's dynamic extent offsets the small allocation saving; no full suite
 was run after the canonical long endpoint regressed.
+
+### EXP-T026: dynamic-shape CUDA graph replay
+
+- Implementation commits: `97a5ed2`, `852ea26`, `918ebab`.
+- Change: enable Inductor `reduce-overhead` on the EXP-T021 native FP32 decode.
+  The first attempt captured a 289-node graph partition but failed when the
+  next DynamicCache reused graph-owned K/V outputs. Explicit graph-step marks
+  alone did not resolve ownership. The working repair clones each layer's K/V
+  outputs outside the graph before the next invocation, preserving FP32 values.
+- Qualification: two warmups and one measured short run, then two warmups and
+  one measured long run. Medium was skipped after the long regression.
+- Result: rejected as a general path; short-only result retained diagnostically.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 475.46 | 22.39 | 366.88 | 94.16 | 2.720 | 0.1748 | 65 | 177.17 | 2826.3 |
+| Long | 5240.93 | 22.59 | 4806.11 | 267.20 | 25.080 | 0.2090 | 624 | 129.83 | 3419.7 |
+
+Both tested outputs exactly match EXP-T000 tokens and waveform tensors with
+maximum absolute audio difference `0.0`. Inductor records one CUDA graph for
+every cache length: 65 graphs help short versus EXP-T021's `375.18` ms T3, but
+624 graphs plus 48 growing-cache clones per token make long much slower than
+EXP-T021's `4088.59` ms. A bounded early-decode graph window is the only useful
+form of this approach; unbounded `reduce-overhead` is not recommended.
