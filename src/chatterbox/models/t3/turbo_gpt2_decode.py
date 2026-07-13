@@ -132,13 +132,22 @@ class TurboGPT2Decoder:
             )
             key_states = key_cache[layer_index, :, :, :end]
             value_states = value_cache[layer_index, :, :, :end]
+            attention_scale = None
+            if not layer.attn.scale_attn_weights:
+                attention_scale = 1.0
+            if layer.attn.scale_attn_by_inverse_layer_idx:
+                attention_scale = (
+                    self.head_dim**-0.5
+                    if attention_scale is None
+                    else attention_scale
+                ) / (layer_index + 1)
             attn_output = F.scaled_dot_product_attention(
                 query.to(self.cache_dtype),
                 key_states,
                 value_states,
                 dropout_p=0.0,
                 is_causal=False,
-                scale=layer.attn.scaling,
+                scale=attention_scale,
             )
             attn_output = attn_output.to(hidden_states.dtype)
             attn_output = attn_output.transpose(1, 2).contiguous()
