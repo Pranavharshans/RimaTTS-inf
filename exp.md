@@ -651,3 +651,24 @@ only 1.75 ms, well inside run-to-run variance, while peak allocation rises from
 3164.4 MiB to 3218.9 MiB and the path relies on a private PyTorch API. The
 short gate therefore does not justify a full run, and per-layer clones remain
 the retained implementation.
+
+### EXP-018: skip identity `top_p=1.0` processing
+
+- Implementation commit: `b3a73da`.
+- Change: bypass `TopPLogitsWarper` only when `top_p` is exactly `1.0`, the
+  public default. Other values still use Transformers' implementation and
+  validation unchanged.
+- Identity proof: random 4-by-6561 CPU and CUDA logits are bit-identical before
+  and after `TopPLogitsWarper(top_p=1.0)`, with maximum difference 0.0 and no
+  filtered values.
+- Runs: two warmups and five measured short runs.
+- Result: exact-token short gate passed; full evaluation pending.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 1148.34 +/- 11.14 | 41.74 +/- 1.57 | 446.84 +/- 10.29 | 674.24 +/- 7.70 | 2.200 | 0.5220 +/- 0.0051 | 56 | 125.38 +/- 2.84 | 3164.2 |
+
+Short T3 is 1.33 ms below EXP-011, which is too small to distinguish from run
+variance alone. The change is retained for a full run because it is a proven
+identity transform, removes one full-vocabulary sort per token, preserves the
+non-default path, and has no memory penalty.
