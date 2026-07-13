@@ -324,7 +324,7 @@ class T3(nn.Module):
         generated_length = 1
 
         # Instantiate the logits processors.
-        top_p_warper = TopPLogitsWarper(top_p=top_p)
+        top_p_warper = None if top_p == 1.0 else TopPLogitsWarper(top_p=top_p)
         min_p_warper = MinPLogitsWarper(min_p=min_p)
         repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=float(repetition_penalty))
 
@@ -392,7 +392,8 @@ class T3(nn.Module):
 
                 # Apply min_p and top_p filtering
                 logits = min_p_warper(ids_for_proc, logits)
-                logits = top_p_warper(ids_for_proc, logits)
+                if top_p_warper is not None:
+                    logits = top_p_warper(ids_for_proc, logits)
 
                 # Convert logits to probabilities and sample the next token.
                 probs = torch.softmax(logits, dim=-1)
