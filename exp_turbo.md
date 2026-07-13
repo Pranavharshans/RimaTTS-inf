@@ -317,3 +317,28 @@ Every token and float-waveform tensor exactly matches EXP-T000 with maximum
 absolute audio difference `0.0`. Prefill is intentionally unchanged, so stable
 short and medium TTFT remains about 22 ms. Compilation happens during warmup and
 is excluded from measured runs. This is the current recommended Turbo path.
+
+#### EXP-T009 retained-path profile
+
+- Profiler implementation commit: `1c6f9ef`.
+- Workload: short prompt, two warmups, T3 only, exact EXP-T000 token hash.
+- Cache: FP32 `DynamicCache`, 24 layers, contiguous K/V from prefill shape
+  `[1,16,386,64]` through final shape `[1,16,451,64]`.
+- Attention: SDPA still selects
+  `fmha_cutlassF_f32_aligned_64x64_rf_sm80`; compile does not switch kernels.
+
+| Operator group | Calls | CUDA self ms | Observation |
+|---|---:|---:|---|
+| Efficient attention | 1,584 | 126.86 | Largest remaining GPU component |
+| `mm` | 4,680 | 78.91 | FP32 projection/MLP GEMV work |
+| `addmm` | 1,723 | 41.79 | FP32 projection/MLP GEMV work |
+| Top-p processor annotation | 66 | 14.96 | Profiler annotation; includes children |
+| Repetition processor annotation | 66 | 7.41 | Profiler annotation; includes children |
+| Top-k processor annotation | 66 | 5.21 | Profiler annotation; includes children |
+| Visible `cat` | 117 | 0.51 | Down from 3,237 and 15.45 ms in EXP-T001 |
+
+The profiler reports 287.56 ms total CUDA self-time. Efficient attention is
+44% of that total, while `mm` plus `addmm` is another 42%. The compiled graph
+fuses most cache growth into Triton kernels, so replacing DynamicCache storage
+is no longer the high-value target. The next attention experiment must retain
+contiguous dynamic K/V layout.
