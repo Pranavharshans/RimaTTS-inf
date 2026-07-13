@@ -530,3 +530,23 @@ EXP-011, short T3 falls from 448.17 ms to 440.88 ms and throughput rises from
 3218.7 MiB because the stacked ownership buffer is live as the next graph
 input. Medium and long runs are required to determine whether the dispatch
 reduction continues to outweigh the larger contiguous copy.
+
+#### EXP-014 full benchmark
+
+- Runs: two warmups and five measured runs per prompt.
+- Result: rejected and removed after logging. All token and WAV hashes remain
+  exactly identical to EXP-000, but latency stability and memory are worse than
+  EXP-011.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 1154.88 +/- 26.49 | 42.65 +/- 5.72 | 441.97 +/- 13.70 | 678.95 +/- 11.66 | 2.200 | 0.5249 +/- 0.0120 | 56 | 126.80 +/- 3.77 | 3218.7 |
+| Medium | 2139.61 +/- 218.71 | 41.62 +/- 4.19 | 1414.17 +/- 223.22 | 669.52 +/- 10.46 | 6.440 | 0.3322 +/- 0.0340 | 162 | 116.47 +/- 15.17 | 3373.4 |
+| Long | 6661.68 +/- 342.48 | 45.37 +/- 5.21 | 5529.50 +/- 327.49 | 1017.88 +/- 2.58 | 19.640 | 0.3392 +/- 0.0174 | 492 | 89.21 +/- 4.90 | 3850.5 |
+
+The first measured medium T3 run is 1813.40 ms while the remaining four are
+1309.61-1320.44 ms. The first long T3 run is 6115.13 ms while the remaining
+four are 5374.17-5394.63 ms. These post-warmup outliers make both means slower
+than EXP-011. Long peak allocation also rises from 3503.0 MiB to 3850.5 MiB.
+The small steady-state median improvement does not justify less predictable
+latency or the larger buffer, so the per-layer clone implementation is restored.
