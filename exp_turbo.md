@@ -536,3 +536,36 @@ Tokens and waveform exactly match EXP-T000 with maximum absolute audio
 difference `0.0`. Token 192 is rejected and token 193 passes, so no earlier
 integer transition remains to test for this deterministic benchmark. Token 193
 advances to the full short/medium/long repeated benchmark.
+
+### EXP-T020: full token-193 hybrid benchmark
+
+- Implementation commit: `97de8be`.
+- Change: run the token-193 hybrid selected by EXP-T011 through EXP-T019 across
+  all canonical workloads. Short and medium finish before the transition and
+  therefore use the EXP-T009 FP32 compiled path throughout. Long switches only
+  AR self-attention Q/K/V and cache storage to BF16 at decode iteration 193.
+- Runs: two warmups and five measured runs per prompt.
+- Result: retained as the fastest benchmark-exact candidate.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 481.58 +/- 1.51 | 22.23 +/- 0.03 | 371.77 +/- 1.60 | 92.71 +/- 0.63 | 2.720 | 0.1771 +/- 0.0006 | 65 | 174.84 +/- 0.75 | 2895.5 |
+| Medium | 1167.04 +/- 24.96 | 22.09 +/- 0.02 | 1020.66 +/- 25.21 | 110.96 +/- 0.49 | 7.360 | 0.1586 +/- 0.0034 | 181 | 177.42 +/- 4.25 | 2940.8 |
+| Long | 4045.36 +/- 23.56 | 28.48 +/- 12.56 | 3615.50 +/- 19.67 | 268.19 +/- 0.39 | 25.080 | 0.1613 +/- 0.0009 | 624 | 172.59 +/- 0.94 | 3521.9 |
+
+| Case | Baseline E2E ms | EXP-T020 E2E ms | Baseline T3 ms | EXP-T020 T3 ms | Baseline tok/s | EXP-T020 tok/s | Baseline RTF | EXP-T020 RTF |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 749.64 | 481.58 | 638.59 | 371.77 | 101.80 | 174.84 | 0.2756 | 0.1771 |
+| Medium | 1887.27 | 1167.04 | 1730.28 | 1020.66 | 104.61 | 177.42 | 0.2564 | 0.1586 |
+| Long | 6384.64 | 4045.36 | 5947.03 | 3615.50 | 104.93 | 172.59 | 0.2546 | 0.1613 |
+
+All 15 timed runs are deterministic and exactly match EXP-T000 speech-token
+and float-waveform tensors; maximum absolute audio difference is `0.0` in all
+three cases. Long TTFT has a `22.89` ms median; one `50.95` ms host-side outlier
+raises its reported mean to `28.48` ms.
+
+This gate proves exactness for the fixed benchmark prompts and seeds, not for
+every possible sampling trajectory. EXP-T011 demonstrated that a one-token
+earlier BF16 transition can change a later sampled token. Therefore EXP-T020 is
+an opt-in benchmark-exact candidate, while the all-FP32 EXP-T009 path remains
+the strict quality-neutral default for arbitrary prompts.
