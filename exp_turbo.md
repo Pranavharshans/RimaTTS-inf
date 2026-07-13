@@ -126,3 +126,25 @@ and FP32 attention. First test TF32 matmuls, which can accelerate projections
 without changing tensor storage or cache precision. Then isolate cache/loop
 allocation and compilation; BF16/Flash paths are not eligible for retention
 unless they pass the exact token and waveform gate.
+
+### EXP-T002: T3-only TF32 matmul precision
+
+- Benchmark-mode commit: `d00eaab`.
+- Change: set FP32 matmul precision to `high` only while T3 runs, then restore
+  `highest` before S3Gen. Weights, activations, KV cache, sampling, S3Gen, and
+  watermark remain FP32 and unchanged.
+- Runs: two warmups and five measured runs per prompt.
+- Result: rejected for performance; exact-output quality gate passed.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 758.24 +/- 14.03 | 19.64 +/- 0.09 | 646.48 +/- 10.80 | 95.01 +/- 2.24 | 2.720 | 0.2788 +/- 0.0052 | 65 | 100.57 +/- 1.69 | 2824.9 |
+| Medium | 1919.40 +/- 9.52 | 19.91 +/- 0.12 | 1765.28 +/- 5.54 | 111.92 +/- 1.34 | 7.360 | 0.2608 +/- 0.0013 | 181 | 102.53 +/- 0.32 | 2900.5 |
+| Long | 6468.48 +/- 93.58 | 30.95 +/- 14.43 | 6025.69 +/- 89.03 | 268.00 +/- 0.54 | 25.080 | 0.2579 +/- 0.0037 | 624 | 103.57 +/- 1.56 | 3419.0 |
+
+Every speech-token tensor and final float waveform exactly matches EXP-T000;
+maximum absolute audio difference is `0.0` for all cases. TF32 improves the
+stable short and medium TTFT values, but complete T3 time regresses from
+638.59/1730.28/5947.03 ms to 646.48/1765.28/6025.69 ms. The batch-one decode
+is dominated by narrow GEMV-like operations that do not receive the regular
+model's TF32 benefit, so this mode is not retained.
