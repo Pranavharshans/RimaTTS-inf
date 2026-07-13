@@ -421,3 +421,20 @@ its two warmups. NVIDIA process memory reached approximately 6.4 GiB while the
 long graph set was being captured; measured PyTorch peak allocation remained
 3.16-3.50 GiB. Production integration therefore needs an explicit warmup API
 and must document the startup/capture tradeoff.
+
+### EXP-011: all-TF32 CUDA graphs
+
+- Code change: none; use EXP-010 with T3 matmul precision set to `high` from
+  prefill through the entire decode instead of switching after token 192.
+- Runs: two warmups and two measured short runs.
+- Result: successful exact-token smoke; full evaluation pending.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short smoke | 1127.91 +/- 11.59 | 39.44 +/- 0.19 | 448.00 +/- 12.32 | 653.97 +/- 1.06 | 2.200 | 0.5127 +/- 0.0053 | 56 | 125.05 +/- 3.44 | 3164.4 |
+
+The two T3 samples were 456.71 ms at 122.62 tokens/s and 439.29 ms at
+127.48 tokens/s. The token hash exactly matches EXP-000. Unlike eager EXP-003,
+CUDA-graph replay removes enough launch overhead for the tensor-core matmul
+path to improve short decode. Medium and long fixtures remain required before
+this precision policy can replace EXP-010's adaptive threshold.
