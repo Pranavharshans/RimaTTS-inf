@@ -299,6 +299,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--label", default="baseline")
     parser.add_argument("--output-dir", type=Path, default=Path("benchmark_results/turbo_baseline"))
+    parser.add_argument("--model-dir", type=Path)
     parser.add_argument("--reference-dir", type=Path)
     parser.add_argument("--require-exact-reference", action="store_true")
     parser.add_argument("--warmups", type=int, default=2)
@@ -348,7 +349,11 @@ def main() -> None:
         raise ValueError("--require-exact-reference requires --reference-dir")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    model = ChatterboxTurboTTS.from_pretrained(device="cuda")
+    model = (
+        ChatterboxTurboTTS.from_local(args.model_dir, device="cuda")
+        if args.model_dir is not None
+        else ChatterboxTurboTTS.from_pretrained(device="cuda")
+    )
     timed_model = TimedTurboModel(model, t3_matmul_precision=args.t3_matmul_precision)
     generation_kwargs = {
         **SAMPLING,

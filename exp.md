@@ -690,3 +690,17 @@ EXP-011, T3 falls from 448.17 ms to 434.91 ms on short, 1357.96 ms to
 fall from 1153.42 ms to 1122.73 ms, 2096.30 ms to 2070.48 ms, and 6620.37 ms
 to 6583.55 ms respectively. This identity bypass is retained in the final
 public configuration.
+
+## RTX 5090 validation: instance 44697129
+
+The retained regular path was rerun on an RTX 5090 with the same fixed prompts,
+seeds, sampling, watermark, and two-warmup/five-run protocol. The full table,
+raw reports, and 3090 comparison are in
+[`docs/benchmark_5090.md`](docs/benchmark_5090.md).
+
+| Config | Short E2E / T3 / Tok/s | Medium E2E / T3 / Tok/s | Long E2E / T3 / Tok/s |
+|---|---:|---:|---:|
+| 5090 baseline | 1636.07 / 1183.26 / 47.33 | 3800.21 / 3275.58 / 49.46 | 10450.44 / 9752.17 / 50.45 |
+| 5090 optimized | 858.07 / 373.99 / 150.86 | 1500.42 / 979.38 / 165.59 | 4405.04 / 3761.27 / 133.59 |
+
+All regular optimized token hashes matched the 5090 baseline hashes exactly.

@@ -839,3 +839,18 @@ passes exact internal-tie and top-k-boundary-tie tests, but the production path
 requires `fullgraph=True`; this revision is therefore not runnable as configured.
 The next revision will pass the cumulative-probability cutoff as a tensor
 operand instead of allowing Dynamo to capture it as a symbolic float.
+
+## RTX 5090 validation: instance 44697129
+
+The strict quality-neutral Turbo path was rerun on an RTX 5090 with the same
+fixed prompts, seeds, sampling, watermark, and two-warmup/five-run protocol.
+The full table, raw reports, and 3090 comparison are in
+[`docs/benchmark_5090.md`](docs/benchmark_5090.md).
+
+| Config | Short E2E / T3 / Tok/s | Medium E2E / T3 / Tok/s | Long E2E / T3 / Tok/s |
+|---|---:|---:|---:|
+| 5090 baseline | 1000.71 / 835.93 / 77.82 | 2402.46 / 2149.27 / 84.23 | 7695.28 / 7226.93 / 86.34 |
+| 5090 optimized | 678.76 / 509.21 / 128.19 | 1483.18 / 1213.83 / 149.12 | 4753.23 / 4282.28 / 145.85 |
+
+Turbo's exact-output gate passed: optimized token and waveform hashes matched
+the baseline for short, medium, and long cases.

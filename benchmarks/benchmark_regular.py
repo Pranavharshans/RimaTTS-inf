@@ -221,6 +221,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--label", default="baseline")
     parser.add_argument("--output-dir", type=Path, default=Path("benchmark_results/baseline"))
+    parser.add_argument("--model-dir", type=Path)
     parser.add_argument("--warmups", type=int, default=2)
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument("--cases", nargs="+", choices=PROMPTS, default=list(PROMPTS))
@@ -243,7 +244,11 @@ def main() -> None:
         raise RuntimeError("This benchmark requires CUDA")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    model = ChatterboxTTS.from_pretrained(device="cuda")
+    model = (
+        ChatterboxTTS.from_local(args.model_dir, device="cuda")
+        if args.model_dir is not None
+        else ChatterboxTTS.from_pretrained(device="cuda")
+    )
     if args.t3_dtype == "bfloat16":
         if not torch.cuda.is_bf16_supported():
             raise RuntimeError("The selected CUDA device does not support bfloat16")
