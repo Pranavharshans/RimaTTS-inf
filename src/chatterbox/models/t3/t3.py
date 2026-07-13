@@ -86,7 +86,7 @@ class T3(nn.Module):
         self.compiled = False
         self.patched_model = None
         self._compiled_decode_callables = {}
-        self._compile_rotary_disabled = False
+        self._compile_rotary_mode = None
 
     @property
     def device(self):
@@ -250,6 +250,7 @@ class T3(nn.Module):
         tf32_after_tokens: Optional[int] = None,
         compile_decode: bool = False,
         compile_mode: str = "default",
+        compile_rope: bool = False,
         show_progress: bool = True,
     ):
         """
@@ -340,24 +341,35 @@ class T3(nn.Module):
         # Initialize kv_cache with the full context.
         past = output.past_key_values
         cfg = torch.as_tensor(cfg_weight, device=output.logits.device, dtype=output.logits.dtype)
-        if compile_decode and compile_mode not in self._compiled_decode_callables:
+        compile_key = (compile_mode, compile_rope)
+        if compile_decode and compile_key not in self._compiled_decode_callables:
             if compile_mode not in {"default", "reduce-overhead", "max-autotune-no-cudagraphs"}:
                 raise ValueError(f"Unsupported compile_mode: {compile_mode}")
-            if not self._compile_rotary_disabled:
-                self.tfmr.rotary_emb.forward = torch.compiler.disable(
-                    self.tfmr.rotary_emb.forward,
-                    recursive=False,
-                    reason="RoPE buffer capture is incompatible with dynamic T3 decode",
-                )
-                self._compile_rotary_disabled = True
-            self._compiled_decode_callables[compile_mode] = torch.compile(
+            rotary_mode = "compiled" if compile_rope else "eager"
+            if self._compile_rotary_mode != rotary_mode:
+                if compile_rope:
+                    rotary_forward = type(self.tfmr.rotary_emb).forward
+                    while hasattr(rotary_forward, "__wrapped__"):
+                        rotary_forward = rotary_forward.__wrapped__
+                    self.tfmr.rotary_emb.forward = rotary_forward.__get__(
+                        self.tfmr.rotary_emb,
+                        type(self.tfmr.rotary_emb),
+                    )
+                else:
+                    self.tfmr.rotary_emb.forward = torch.compiler.disable(
+                        self.tfmr.rotary_emb.forward,
+                        recursive=False,
+                        reason="RoPE buffer capture is incompatible with dynamic T3 decode",
+                    )
+                self._compile_rotary_mode = rotary_mode
+            self._compiled_decode_callables[compile_key] = torch.compile(
                 self.patched_model.forward,
                 dynamic=True,
                 fullgraph=False,
                 mode=compile_mode,
             )
         decode_forward = (
-            self._compiled_decode_callables[compile_mode]
+            self._compiled_decode_callables[compile_key]
             if compile_decode
             else self.patched_model.forward
         )

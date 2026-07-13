@@ -229,6 +229,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--t3-matmul-precision", choices=("highest", "high"), default="highest")
     parser.add_argument("--t3-tf32-after-tokens", type=int)
     parser.add_argument("--compile-t3-decode", action="store_true")
+    parser.add_argument("--compile-t3-rope", action="store_true")
     parser.add_argument(
         "--t3-compile-mode",
         choices=("default", "reduce-overhead", "max-autotune-no-cudagraphs"),
@@ -257,6 +258,7 @@ def main() -> None:
         "t3_matmul_precision": args.t3_matmul_precision,
         "t3_tf32_after_tokens": args.t3_tf32_after_tokens,
         "compile_t3_decode": args.compile_t3_decode,
+        "compile_t3_rope": args.compile_t3_rope,
         "t3_compile_mode": args.t3_compile_mode,
         "show_progress": False,
     }
@@ -283,6 +285,7 @@ def main() -> None:
             "t3_matmul_precision": args.t3_matmul_precision,
             "t3_tf32_after_tokens": args.t3_tf32_after_tokens,
             "compile_t3_decode": args.compile_t3_decode,
+            "compile_t3_rope": args.compile_t3_rope,
             "t3_compile_mode": args.t3_compile_mode,
             "sampling": {
                 "repetition_penalty": 1.2,
