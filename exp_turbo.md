@@ -77,3 +77,52 @@ work, not S3Gen. The raw artifacts remain on the GPU under
 The previous instance `44639182` developed a CUDA UVM `EIO` before a Turbo
 baseline could run. That infrastructure failure is documented here but is not
 counted as an experiment or model result.
+
+### EXP-T001: T3 kernel and KV-cache profile
+
+- Profiler commit: `85f1fef`.
+- Workload: two warmups followed by a PyTorch CPU/CUDA trace of the short T3
+  path only; S3Gen, vocoder, and watermark were not profiled.
+- Quality check: 65 generated tokens with hash
+  `694ab5f7af59523030379696e24a182126d2ff1f4be092269a8fc4cdfe42ec62`,
+  exactly matching EXP-T000.
+- Result: diagnostic accepted; model behavior did not change.
+
+Architecture and cache findings:
+
+- All 298 T3 parameter tensors are FP32 and occupy 1630.33 MiB.
+- Transformers selects its `sdpa` implementation. The actual decode kernel is
+  PyTorch's FP32 CUTLASS memory-efficient attention
+  (`fmha_cutlassF_f32_aligned_64x64_rf_sm80`), not Flash Attention.
+- All SDP backend switches are enabled, but native Flash Attention is not
+  eligible for this FP32 path.
+- The cache is a 24-layer FP32 `DynamicCache`. First-layer K and V are each
+  contiguous `[1, 16, sequence, 64]` tensors.
+- Prefill creates a cache length of 386. The final short-run cache length is
+  451 after 66 transformer calls.
+
+Main traced operators:
+
+| Operator group | Calls | CUDA total ms | Self CUDA ms | CPU total ms | Cumulative CUDA allocation |
+|---|---:|---:|---:|---:|---:|
+| Projection/MLP (`aten::addmm`) | 6,403 | 123.35 | 123.28 | 131.65 | 388.18 MiB |
+| Efficient attention forward | 1,584 | 119.38 | 119.38 | 39.03 | 43.08 MiB |
+| Dynamic-cache and loop concatenation (`aten::cat`) | 3,237 | 15.45 | 15.45 | 47.51 | 5.15 GiB |
+| Top-p processing | 66 | 3.79 | diagnostic annotation | 18.86 | 9.18 MiB released net |
+| Top-k processing | 66 | 3.68 | diagnostic annotation | 8.84 | 1.19 MiB released net |
+| Speech logits head | 66 | 2.27 | 2.27 | 3.90 | included in linear ops |
+| Multinomial sampling | 66 | 1.98 | child kernels | 13.60 | 1.97 MiB released net |
+| Repetition penalty | 66 | 0.71 | diagnostic annotation | 10.65 | 0.16 MiB released net |
+| Speech embedding | 66 | 0.15 | 0.15 | 3.42 | negligible |
+
+The trace also contains 130 `aten::all` calls, 197 scalar reads, and 131
+device-to-host scalar copies. These come from the per-token all-invalid-logits
+and EOS checks. Profiler wall time is intentionally excluded from latency
+comparisons because instrumentation reduces the visible loop rate from about
+105 to 63 tokens/s.
+
+The dominant work is split almost evenly between FP32 projection/MLP matmuls
+and FP32 attention. First test TF32 matmuls, which can accelerate projections
+without changing tensor storage or cache precision. Then isolate cache/loop
+allocation and compilation; BF16/Flash paths are not eligible for retention
+unless they pass the exact token and waveform gate.
