@@ -36,6 +36,18 @@ def _ensure_BOT_EOT(text_tokens: Tensor, hp):
     assert (text_tokens == hp.stop_text_token).int().sum() >= B, "missing stop_text_token"
 
 
+def _compiled_default_rope_forward(rotary, x: Tensor, position_ids: Tensor):
+    inv_freq = rotary._compile_inv_freq_expanded.expand(position_ids.shape[0], -1, 1).to(x.device)
+    positions = position_ids[:, None, :].float()
+    device_type = x.device.type if x.device.type != "mps" else "cpu"
+    with torch.autocast(device_type=device_type, enabled=False):
+        freqs = (inv_freq.float() @ positions.float()).transpose(1, 2)
+        emb = torch.cat((freqs, freqs), dim=-1)
+        cos = emb.cos() * rotary.attention_scaling
+        sin = emb.sin() * rotary.attention_scaling
+    return cos.to(dtype=x.dtype), sin.to(dtype=x.dtype)
+
+
 class T3(nn.Module):
     """
     Token-To-Token (T3) TTS model using huggingface transformer models as backbones,
@@ -348,17 +360,13 @@ class T3(nn.Module):
             rotary_mode = "compiled" if compile_rope else "eager"
             if self._compile_rotary_mode != rotary_mode:
                 if compile_rope:
-                    if "inv_freq" in self.tfmr.rotary_emb._buffers:
-                        inv_freq = self.tfmr.rotary_emb.inv_freq
-                        del self.tfmr.rotary_emb.inv_freq
+                    if not hasattr(self.tfmr.rotary_emb, "_compile_inv_freq_expanded"):
+                        inv_freq = self.tfmr.rotary_emb.inv_freq[None, :, None].clone()
                         self.tfmr.rotary_emb.register_parameter(
-                            "inv_freq",
+                            "_compile_inv_freq_expanded",
                             nn.Parameter(inv_freq, requires_grad=False),
                         )
-                    rotary_forward = type(self.tfmr.rotary_emb).forward
-                    while hasattr(rotary_forward, "__wrapped__"):
-                        rotary_forward = rotary_forward.__wrapped__
-                    self.tfmr.rotary_emb.forward = rotary_forward.__get__(
+                    self.tfmr.rotary_emb.forward = _compiled_default_rope_forward.__get__(
                         self.tfmr.rotary_emb,
                         type(self.tfmr.rotary_emb),
                     )
