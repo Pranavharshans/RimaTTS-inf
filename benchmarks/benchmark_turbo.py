@@ -81,8 +81,9 @@ def tensor_sha256(tensor: torch.Tensor, *, dtype: torch.dtype) -> str:
 class TimedTurboModel:
     """Install measurement-only wrappers around Turbo's public inference path."""
 
-    def __init__(self, model: ChatterboxTurboTTS):
+    def __init__(self, model: ChatterboxTurboTTS, *, t3_matmul_precision: str):
         self.model = model
+        self.t3_matmul_precision = t3_matmul_precision
         self.metrics: dict[str, Any] = {}
         self._t3_inference = model.t3.inference_turbo
         self._s3gen_inference = model.s3gen.inference
@@ -115,10 +116,13 @@ class TimedTurboModel:
                 ttft_ms = (time.perf_counter() - started) * 1000.0
             return result
 
+        original_matmul_precision = torch.get_float32_matmul_precision()
         torch.multinomial = timed_multinomial
         try:
+            torch.set_float32_matmul_precision(self.t3_matmul_precision)
             tokens = self._t3_inference(*args, **kwargs)
         finally:
+            torch.set_float32_matmul_precision(original_matmul_precision)
             torch.multinomial = original_multinomial
 
         synchronize()
@@ -301,6 +305,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument("--cases", nargs="+", choices=PROMPTS, default=list(PROMPTS))
     parser.add_argument("--seed", type=int, default=20260713)
+    parser.add_argument(
+        "--t3-matmul-precision", choices=("highest", "high"), default="highest"
+    )
     return parser.parse_args()
 
 
@@ -313,7 +320,7 @@ def main() -> None:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     model = ChatterboxTurboTTS.from_pretrained(device="cuda")
-    timed_model = TimedTurboModel(model)
+    timed_model = TimedTurboModel(model, t3_matmul_precision=args.t3_matmul_precision)
 
     payload: dict[str, Any] = {
         "label": args.label,
@@ -335,6 +342,7 @@ def main() -> None:
             "warmups": args.warmups,
             "runs": args.runs,
             "base_seed": args.seed,
+            "t3_matmul_precision": args.t3_matmul_precision,
             "sampling": {**SAMPLING, "watermark": True, "s3gen_cfm_steps": 2},
             "conditioning": "checkpoint built-in voice",
             "reference_dir": str(args.reference_dir) if args.reference_dir else None,
