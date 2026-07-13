@@ -153,6 +153,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--profile-memory", action="store_true")
     parser.add_argument("--warmups", type=int, default=2)
     parser.add_argument("--matmul-precision", choices=("highest", "high"), default="highest")
+    parser.add_argument("--compile-native-t3-decode", action="store_true")
     return parser.parse_args()
 
 
@@ -194,6 +195,8 @@ def main() -> None:
             top_p=0.95,
             repetition_penalty=1.2,
             max_gen_len=1000,
+            compile_native_decode=args.compile_native_t3_decode,
+            show_progress=False,
         )
 
     original_matmul_precision = torch.get_float32_matmul_precision()
@@ -218,6 +221,22 @@ def main() -> None:
                 "turbo::transformer",
                 capture_cache,
             )
+            if args.compile_native_t3_decode:
+                compile_key = "fullgraph_dynamic_no_cudagraphs"
+                original_compiled = model.t3._turbo_native_decode_callables[compile_key]
+
+                def wrapped_compiled(*call_args: Any, **call_kwargs: Any) -> Any:
+                    with record_function("turbo::compiled_transformer"):
+                        result = original_compiled(*call_args, **call_kwargs)
+                    capture_cache(call_args, call_kwargs, result)
+                    return result
+
+                model.t3._turbo_native_decode_callables[compile_key] = wrapped_compiled
+                patches.callback(
+                    model.t3._turbo_native_decode_callables.__setitem__,
+                    compile_key,
+                    original_compiled,
+                )
             patch_method(patches, model.t3.speech_emb, "forward", "turbo::speech_embedding")
             patch_method(patches, model.t3.speech_head, "forward", "turbo::speech_head")
 
@@ -271,6 +290,7 @@ def main() -> None:
         "configuration": {
             "warmups": args.warmups,
             "matmul_precision": args.matmul_precision,
+            "compile_native_t3_decode": args.compile_native_t3_decode,
             "text": args.text,
         },
         "token_sha256": hashlib.sha256(
