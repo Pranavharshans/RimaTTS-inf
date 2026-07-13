@@ -569,3 +569,33 @@ every possible sampling trajectory. EXP-T011 demonstrated that a one-token
 earlier BF16 transition can change a later sampled token. Therefore EXP-T020 is
 an opt-in benchmark-exact candidate, while the all-FP32 EXP-T009 path remains
 the strict quality-neutral default for arbitrary prompts.
+
+### EXP-T021: full-graph logits processing on strict FP32 decode
+
+- Implementation commit: `955849a`.
+- Change: keep the retained EXP-T009 all-FP32 transformer path and compile the
+  deterministic logits pipeline as a separate dynamic full graph. Temperature,
+  top-k, top-p, repetition penalty, and softmax retain the exact upstream
+  operation order. CUDA graphs remain disabled and multinomial RNG stays
+  outside the compiled graph.
+- Runs: two warmups and five measured runs per prompt.
+- Result: retained as the new strict quality-neutral default.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 484.21 +/- 2.13 | 22.17 +/- 0.05 | 375.18 +/- 2.01 | 94.39 +/- 0.75 | 2.720 | 0.1780 +/- 0.0008 | 65 | 173.25 +/- 0.93 | 2895.5 |
+| Medium | 1158.73 +/- 5.66 | 22.14 +/- 0.03 | 1011.55 +/- 5.85 | 112.56 +/- 1.52 | 7.360 | 0.1574 +/- 0.0008 | 181 | 178.94 +/- 1.03 | 2940.8 |
+| Long | 4520.54 +/- 21.65 | 28.52 +/- 12.77 | 4088.59 +/- 20.92 | 268.48 +/- 0.43 | 25.080 | 0.1802 +/- 0.0009 | 624 | 152.62 +/- 0.78 | 3419.0 |
+
+| Case | EXP-T009 E2E ms | EXP-T021 E2E ms | EXP-T009 T3 ms | EXP-T021 T3 ms | EXP-T009 tok/s | EXP-T021 tok/s |
+|---|---:|---:|---:|---:|---:|---:|
+| Short | 498.52 | 484.21 | 385.49 | 375.18 | 168.74 | 173.25 |
+| Medium | 1166.60 | 1158.73 | 1015.41 | 1011.55 | 178.28 | 178.94 |
+| Long | 4616.80 | 4520.54 | 4160.13 | 4088.59 | 150.00 | 152.62 |
+
+All 15 timed runs exactly match EXP-T000 token and waveform tensors with
+maximum absolute audio difference `0.0`. The processor's eager implementation
+also has a unit test requiring exact tensor equality against Transformers.
+Long TTFT median is `22.88` ms; one `51.36` ms host-side outlier raises the
+mean. Unlike the hybrid path, this experiment does not change any model or
+cache dtype and is retained for arbitrary prompts.
