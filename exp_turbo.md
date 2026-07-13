@@ -711,3 +711,23 @@ every cache length: 65 graphs help short versus EXP-T021's `375.18` ms T3, but
 624 graphs plus 48 growing-cache clones per token make long much slower than
 EXP-T021's `4088.59` ms. A bounded early-decode graph window is the only useful
 form of this approach; unbounded `reduce-overhead` is not recommended.
+
+### EXP-T027: bounded 64-step CUDA graph window
+
+- Implementation commit: `d07a22e`.
+- Change: use EXP-T026 CUDA graph replay and external K/V clones only for the
+  first 64 decode iterations, then switch to the EXP-T021 default FP32 compiled
+  decoder without graph replay or cache clones.
+- Qualification: two warmups and one measured canonical long run.
+- Result: rejected for performance; exact-output gate passed.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Long | 4602.28 | 22.57 | 4135.26 | 267.55 | 25.080 | 0.1835 | 624 | 150.90 | 3419.7 |
+
+Tokens and waveform exactly match EXP-T000 with maximum absolute audio
+difference `0.0`. Bounding replay removes EXP-T026's severe long regression,
+but it remains slower than EXP-T021's `4088.59` ms T3 and `152.62` tokens/s.
+Even 64 iterations launch and allocate 48 separate full-prefix K/V clones per
+token; reducing those copies to one packed operation is required before CUDA
+graphs can be reconsidered.
