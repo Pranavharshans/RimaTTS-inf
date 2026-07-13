@@ -37,7 +37,7 @@ def _ensure_BOT_EOT(text_tokens: Tensor, hp):
 
 
 def _compiled_default_rope_forward(rotary, x: Tensor, position_ids: Tensor):
-    inv_freq = rotary._compile_inv_freq_expanded.expand(position_ids.shape[0], -1, 1).to(x.device)
+    inv_freq = rotary._compile_inv_freq_expanded
     positions = position_ids[:, None, :].float()
     device_type = x.device.type if x.device.type != "mps" else "cpu"
     with torch.autocast(device_type=device_type, enabled=False):
