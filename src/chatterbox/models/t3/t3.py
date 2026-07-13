@@ -422,6 +422,11 @@ class T3(nn.Module):
                 )
                 # Update the kv_cache.
                 past = output.past_key_values
+                if compile_decode and compile_mode == "reduce-overhead":
+                    for layer in past.layers:
+                        if layer.is_initialized:
+                            layer.keys = layer.keys.clone()
+                            layer.values = layer.values.clone()
         finally:
             if original_matmul_precision is not None:
                 torch.set_float32_matmul_precision(original_matmul_precision)
