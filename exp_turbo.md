@@ -822,3 +822,20 @@ test. Against EXP-T021, T3 improves from `375.18/1011.55/4088.59` ms to
 top-k boundary, where direct top-k scatter keeps exactly 1,000 entries while
 Transformers' threshold mask may keep more; an exact fallback is required
 before this replaces EXP-T021 as the arbitrary-prompt default.
+
+### EXP-T032: tie-safe compact logits conditional
+
+- Implementation commit: `c4307db`.
+- Change: detect equal adjacent values among the top-k candidates and use a
+  device-side `torch.cond` to execute the original full-sort top-k/top-p path
+  whenever top-k and sort tie ordering could differ.
+- Qualification: one short warmup against the exact EXP-T000 reference.
+- Result: rejected before timing; no model output was generated.
+
+PyTorch 2.12 fails while tracing the full logits graph because the conditional
+captures `1 - top_p` as a `SymFloat`. `torch.cond` accepts tensor, integer, and
+`SymInt` operands but rejects the captured symbolic float. The eager processor
+passes exact internal-tie and top-k-boundary-tie tests, but the production path
+requires `fullgraph=True`; this revision is therefore not runnable as configured.
+The next revision will pass the cumulative-probability cutoff as a tensor
+operand instead of allowing Dynamo to capture it as a symbolic float.
