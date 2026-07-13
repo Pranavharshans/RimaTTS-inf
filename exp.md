@@ -632,3 +632,22 @@ when reached through Transformers' original model-forward segmentation. On this
 PyTorch 2.12/CUDA 13 runtime, extracting the nested layer core is therefore not
 a valid graph consolidation route. EXP-011's eager RoPE graph break remains the
 stable retained implementation.
+
+### EXP-017: foreach-batched K/V ownership copies
+
+- Experimental implementation commit: `4ceaba7`.
+- Change: allocate the same independent contiguous K/V destinations as
+  EXP-011, but replace 60 clone-copy submissions per token with one private
+  `torch._foreach_copy_` request.
+- Runs: two warmups and five measured short runs.
+- Result: rejected and removed after the short gate.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 1178.42 +/- 11.94 | 42.56 +/- 0.45 | 446.42 +/- 7.72 | 705.20 +/- 5.56 | 2.200 | 0.5356 +/- 0.0054 | 56 | 125.47 +/- 2.14 | 3218.9 |
+
+The token and WAV hashes exactly match EXP-000. T3 differs from EXP-011 by
+only 1.75 ms, well inside run-to-run variance, while peak allocation rises from
+3164.4 MiB to 3218.9 MiB and the path relies on a private PyTorch API. The
+short gate therefore does not justify a full run, and per-layer clones remain
+the retained implementation.
