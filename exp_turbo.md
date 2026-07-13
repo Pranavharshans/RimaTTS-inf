@@ -243,3 +243,26 @@ is excluded, but dynamic-prefix SDPA inside the monolithic compiled graph runs
 far less efficiently than the native eager CUTLASS path. Short T3 latency rises
 from 638.59 to 2418.56 ms and peak allocation rises from 2824.9 to 3754.5 MiB.
 This mode is not part of the recommended path.
+
+### EXP-T007: eager BF16 AR attention and KV cache
+
+- Implementation commits: `c4a0dce`, `aa46c2e`.
+- Change: use the model-specific decode path without `torch.compile`; keep all
+  weights, QKV/MLP projections, logits, conditioning, S3Gen, and watermark in
+  FP32, while casting only AR self-attention Q/K/V and its fixed cache to BF16.
+  Progress rendering is hidden.
+- Runs: two warmups and five measured runs per prompt.
+- Result: rejected for performance; exact-output quality gate passed.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 812.89 +/- 5.17 | 22.17 +/- 0.02 | 704.51 +/- 4.46 | 93.83 +/- 0.59 | 2.720 | 0.2989 +/- 0.0019 | 65 | 92.27 +/- 0.59 | 3016.9 |
+| Medium | 2078.51 +/- 12.45 | 22.23 +/- 0.58 | 1925.96 +/- 7.67 | 115.97 +/- 2.67 | 7.360 | 0.2824 +/- 0.0017 | 181 | 93.98 +/- 0.37 | 3092.5 |
+| Long | 7079.21 +/- 38.15 | 22.72 +/- 0.02 | 6641.70 +/- 37.86 | 273.11 +/- 2.38 | 25.080 | 0.2823 +/- 0.0015 | 624 | 93.95 +/- 0.54 | 3611.0 |
+
+Every token and float-waveform tensor exactly matches EXP-T000 with maximum
+absolute audio difference `0.0`. T3 latency is 704.51/1925.96/6641.70 ms versus
+the untouched baseline's 638.59/1730.28/5947.03 ms. The fixed cache cuts element
+size in half but retains a padded head stride, and the Q/K/V casts plus inefficient
+attention layout outweigh the saved bandwidth. This mode is not part of the
+recommended path.
