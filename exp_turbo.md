@@ -599,3 +599,24 @@ also has a unit test requiring exact tensor equality against Transformers.
 Long TTFT median is `22.88` ms; one `51.36` ms host-side outlier raises the
 mean. Unlike the hybrid path, this experiment does not change any model or
 cache dtype and is retained for arbitrary prompts.
+
+### EXP-T022: token-193 hybrid plus compiled logits
+
+- Implementation commits: `97de8be`, `955849a`.
+- Change: combine the benchmark-exact token-193 BF16 attention transition from
+  EXP-T020 with the full-graph logits processor retained in EXP-T021.
+- Runs: two warmups and five measured runs per prompt.
+- Result: rejected for performance; exact-output gate passed.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 483.17 +/- 6.32 | 22.08 +/- 0.03 | 374.02 +/- 5.85 | 94.18 +/- 0.64 | 2.720 | 0.1776 +/- 0.0023 | 65 | 173.82 +/- 2.67 | 2895.5 |
+| Medium | 1162.72 +/- 6.15 | 22.06 +/- 0.04 | 1011.42 +/- 6.42 | 113.02 +/- 2.07 | 7.360 | 0.1580 +/- 0.0008 | 181 | 178.96 +/- 1.14 | 2940.8 |
+| Long | 4148.19 +/- 26.23 | 33.08 +/- 14.42 | 3719.46 +/- 24.36 | 267.43 +/- 0.26 | 25.080 | 0.1654 +/- 0.0010 | 624 | 167.77 +/- 1.10 | 3521.9 |
+
+All tokens and waveform tensors exactly match EXP-T000 with maximum absolute
+audio difference `0.0`. Short and medium are effectively tied with EXP-T021,
+but long regresses from EXP-T020's `3615.50` ms T3 and `172.59` tokens/s to
+`3719.46` ms and `167.77` tokens/s. The two compiled graphs interfere enough
+with the long decode schedule to erase the logits gain, so this combination is
+not retained.
