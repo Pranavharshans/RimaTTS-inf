@@ -620,3 +620,27 @@ but long regresses from EXP-T020's `3615.50` ms T3 and `172.59` tokens/s to
 `3719.46` ms and `167.77` tokens/s. The two compiled graphs interfere enough
 with the long decode schedule to erase the logits gain, so this combination is
 not retained.
+
+### EXP-T023: fused FP32 native token step
+
+- Implementation commit: `db3c11e`.
+- Change: compile speech embedding lookup, native GPT-2 decode, speech-head
+  projection, temperature/top-k/top-p/repetition processing, and softmax as one
+  dynamic full graph. Multinomial sampling, EOS handling, prefill, all dtypes,
+  S3Gen, and watermark remain unchanged.
+- Runs: two warmups and five measured runs per prompt after a one-run short
+  qualification passed at `370.34` ms T3.
+- Result: rejected for performance; exact-output gate passed.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 514.17 +/- 10.07 | 21.94 +/- 0.07 | 396.91 +/- 8.88 | 96.45 +/- 2.72 | 2.720 | 0.1890 +/- 0.0037 | 65 | 163.83 +/- 3.65 | 2895.7 |
+| Medium | 1351.03 +/- 78.94 | 25.12 +/- 6.22 | 1172.50 +/- 69.09 | 120.26 +/- 7.28 | 7.360 | 0.1836 +/- 0.0107 | 181 | 154.81 +/- 9.28 | 2941.0 |
+| Long | 4956.53 +/- 150.73 | 27.91 +/- 11.01 | 4452.10 +/- 155.59 | 272.49 +/- 4.83 | 25.080 | 0.1976 +/- 0.0060 | 624 | 140.29 +/- 4.81 | 3419.0 |
+
+All token and waveform tensors exactly match EXP-T000 with maximum absolute
+audio difference `0.0`. The fused graph is slower than EXP-T021 in every case
+and becomes highly variable as sequence length grows. Combining dynamic-cache
+attention and sort/top-k logits kernels in one graph prevents the compiler from
+maintaining the efficient schedule produced by the smaller graph boundaries.
+This mode remains opt-in for reproducibility and is not recommended.
