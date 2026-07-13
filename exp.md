@@ -584,3 +584,18 @@ The registration type is therefore not the cause. The next attempt will create
 the exact `[1, head_dim / 2, 1]` expanded frequency tensor once before tracing
 and use a default-RoPE forward that avoids this unsupported indexing node while
 leaving all subsequent FP32 arithmetic unchanged.
+
+#### EXP-015c: pre-expanded RoPE frequency parameter
+
+- Implementation commit: `13d6da9`.
+- Change: precompute the indexed `[1, head_dim / 2, 1]` frequency tensor before
+  tracing and use it in an otherwise equivalent default-RoPE forward.
+- Result: rejected. Compilation again fails during the first warmup; the weak
+  storage error moves from the removed indexing node to
+  `_compile_inv_freq_expanded.expand(...)`. No metrics or tokens were produced.
+
+This narrows the incompatibility to view/metadata operations on the captured
+frequency tensor in this PyTorch 2.12 build. T3 position IDs always have batch
+size one and the pre-expanded tensor is already on the model device, so the
+last narrow attempt will remove the redundant `expand()` and `.to()` calls and
+pass the pre-shaped tensor directly into the same FP32 matmul.
