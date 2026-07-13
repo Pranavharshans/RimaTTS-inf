@@ -790,3 +790,35 @@ difference `0.0`. The 32-step result is effectively tied with the rejected
 Further window reduction leaves less replay work than benchmark variance, so
 dynamic-shape CUDA graphs are closed as a general optimization on this cache.
 EXP-T028 remains useful only as a short-request diagnostic.
+
+### EXP-T031: compact top-k/top-p logits graph
+
+- Implementation commit: `993438a`.
+- Change: retain EXP-T021's strict FP32 transformer path but reuse the 1,000
+  candidates already sorted by `torch.topk` instead of sorting the full 8,196
+  vocabulary again for top-p. The graph reconstructs the same `-inf`-padded
+  ascending logits for softmax/cumsum, filters candidates, then scatters them
+  back before repetition penalty and final softmax.
+- Runs: two warmups and five measured runs per prompt.
+- Result: retained as the fastest all-FP32 candidate; exact-output gate passed.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 478.03 +/- 0.72 | 22.05 +/- 0.08 | 369.17 +/- 1.40 | 93.54 +/- 1.00 | 2.720 | 0.1757 +/- 0.0003 | 65 | 176.07 +/- 0.67 | 2895.5 |
+| Medium | 1146.69 +/- 7.06 | 22.00 +/- 0.05 | 999.48 +/- 6.81 | 111.47 +/- 0.19 | 7.360 | 0.1558 +/- 0.0010 | 181 | 181.10 +/- 1.23 | 2940.8 |
+| Long | 4503.68 +/- 24.55 | 28.60 +/- 13.52 | 4056.29 +/- 19.94 | 268.48 +/- 1.00 | 25.080 | 0.1796 +/- 0.0010 | 624 | 153.84 +/- 0.76 | 3419.0 |
+
+| Case | Baseline E2E ms | EXP-T031 E2E ms | Baseline T3 ms | EXP-T031 T3 ms | Baseline tok/s | EXP-T031 tok/s | Baseline RTF | EXP-T031 RTF |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 749.64 | 478.03 | 638.59 | 369.17 | 101.80 | 176.07 | 0.2756 | 0.1757 |
+| Medium | 1887.27 | 1146.69 | 1730.28 | 999.48 | 104.61 | 181.10 | 0.2564 | 0.1558 |
+| Long | 6384.64 | 4503.68 | 5947.03 | 4056.29 | 104.93 | 153.84 | 0.2546 | 0.1796 |
+
+All 15 timed runs exactly match EXP-T000 token and float-waveform tensors with
+maximum absolute audio difference `0.0`. The compact and Transformers eager
+processors also produce exactly equal logits and probabilities in the unit
+test. Against EXP-T021, T3 improves from `375.18/1011.55/4088.59` ms to
+`369.17/999.48/4056.29` ms. The remaining semantic edge is an exact tie at the
+top-k boundary, where direct top-k scatter keeps exactly 1,000 entries while
+Transformers' threshold mask may keep more; an exact fallback is required
+before this replaces EXP-T021 as the arbitrary-prompt default.
