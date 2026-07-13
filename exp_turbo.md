@@ -288,3 +288,32 @@ absolute audio difference `0.0`. Selective BF16 improves the rejected compiled
 FP32 path slightly, but it remains about four times slower than the untouched
 native decoder. The compiler still lowers dynamic-prefix attention inefficiently,
 so this mode is not part of the recommended path.
+
+### EXP-T009: native full-graph decode with contiguous DynamicCache
+
+- Implementation commit: `f3aa53d`.
+- Change: keep the untouched Transformers prefill and native FP32 DynamicCache,
+  but compile only `GPT2Model.forward()` for one-token decode with
+  `fullgraph=True`, dynamic shapes enabled, and CUDA graphs disabled. This keeps
+  K/V tensors contiguous and preserves the native CUTLASS SDPA path while
+  eliminating Python/dispatcher overhead around the 24 transformer blocks.
+  Sampling, S3Gen, and watermark are unchanged. Progress rendering is hidden.
+- Runs: two warmups and five measured runs per prompt.
+- Result: retained; exact-output quality gate passed.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 498.52 +/- 12.86 | 22.40 +/- 0.20 | 385.49 +/- 12.00 | 94.58 +/- 1.70 | 2.720 | 0.1833 +/- 0.0047 | 65 | 168.74 +/- 5.21 | 2895.5 |
+| Medium | 1166.60 +/- 13.72 | 22.02 +/- 0.06 | 1015.41 +/- 13.64 | 110.83 +/- 0.36 | 7.360 | 0.1585 +/- 0.0019 | 181 | 178.28 +/- 2.41 | 2940.8 |
+| Long | 4616.80 +/- 31.60 | 27.40 +/- 10.19 | 4160.13 +/- 26.58 | 268.47 +/- 0.98 | 25.080 | 0.1841 +/- 0.0013 | 624 | 150.00 +/- 0.95 | 3419.0 |
+
+| Case | Baseline E2E ms | EXP-T009 E2E ms | Baseline T3 ms | EXP-T009 T3 ms | Baseline tok/s | EXP-T009 tok/s | Baseline RTF | EXP-T009 RTF |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 749.64 | 498.52 | 638.59 | 385.49 | 101.80 | 168.74 | 0.2756 | 0.1833 |
+| Medium | 1887.27 | 1166.60 | 1730.28 | 1015.41 | 104.61 | 178.28 | 0.2564 | 0.1585 |
+| Long | 6384.64 | 4616.80 | 5947.03 | 4160.13 | 104.93 | 150.00 | 0.2546 | 0.1841 |
+
+Every token and float-waveform tensor exactly matches EXP-T000 with maximum
+absolute audio difference `0.0`. Prefill is intentionally unchanged, so stable
+short and medium TTFT remains about 22 ms. Compilation happens during warmup and
+is excluded from measured runs. This is the current recommended Turbo path.
