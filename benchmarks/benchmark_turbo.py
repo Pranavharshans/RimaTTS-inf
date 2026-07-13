@@ -326,6 +326,7 @@ def parse_args() -> argparse.Namespace:
         default="bfloat16",
     )
     parser.add_argument("--dynamic-t3-eager", action="store_true")
+    parser.add_argument("--hybrid-t3-after-tokens", type=int)
     parser.add_argument("--hide-progress", action="store_true")
     return parser.parse_args()
 
@@ -352,6 +353,7 @@ def main() -> None:
         "t3_dynamic_decode": args.dynamic_t3_decode,
         "t3_dynamic_cache_dtype": args.dynamic_t3_cache_dtype,
         "t3_dynamic_compile": not args.dynamic_t3_eager,
+        "t3_hybrid_decode_after": args.hybrid_t3_after_tokens,
         "show_progress": not args.hide_progress,
     }
 
@@ -386,6 +388,7 @@ def main() -> None:
             "dynamic_t3_decode": args.dynamic_t3_decode,
             "dynamic_t3_cache_dtype": args.dynamic_t3_cache_dtype,
             "dynamic_t3_compile": not args.dynamic_t3_eager,
+            "hybrid_t3_after_tokens": args.hybrid_t3_after_tokens,
             "show_progress": not args.hide_progress,
             "sampling": {**SAMPLING, "watermark": True, "s3gen_cfm_steps": 2},
             "conditioning": "checkpoint built-in voice",
@@ -396,9 +399,9 @@ def main() -> None:
 
     exact_reference_passed = True
     try:
-        for case_index, case in enumerate(args.cases):
+        for case in args.cases:
             prompt = PROMPTS[case]
-            case_seed = args.seed + case_index * 1000
+            case_seed = args.seed + tuple(PROMPTS).index(case) * 1000
             print(f"\n[{case}] {prompt}")
 
             for warmup in range(args.warmups):

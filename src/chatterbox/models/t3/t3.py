@@ -453,6 +453,7 @@ class T3(nn.Module):
                         compile_native_decode=False,
                         dynamic_decode=False, dynamic_cache_dtype="bfloat16",
                         dynamic_compile=True,
+                        hybrid_decode_after=None,
                         show_progress=True):
 
         logits_processors = LogitsProcessorList()
@@ -517,16 +518,25 @@ class T3(nn.Module):
 
         custom_decoder = None
         dynamic_decoder = None
+        dynamic_decoder_loaded = False
         custom_cache_position = 0
         native_decode = self.tfmr.forward
         selected_decode_modes = sum(
-            (custom_decode, compile_native_decode, dynamic_decode)
+            (
+                custom_decode,
+                compile_native_decode,
+                dynamic_decode,
+                hybrid_decode_after is not None,
+            )
         )
         if selected_decode_modes > 1:
             raise ValueError(
-                "custom_decode, compile_native_decode, and dynamic_decode are mutually exclusive"
+                "custom_decode, compile_native_decode, dynamic_decode, and "
+                "hybrid_decode_after are mutually exclusive"
             )
-        if compile_native_decode:
+        if hybrid_decode_after is not None and hybrid_decode_after < 1:
+            raise ValueError("hybrid_decode_after must be positive")
+        if compile_native_decode or hybrid_decode_after is not None:
             compile_key = "fullgraph_dynamic_no_cudagraphs"
             if compile_key not in self._turbo_native_decode_callables:
                 self._turbo_native_decode_callables[compile_key] = torch.compile(
@@ -557,7 +567,7 @@ class T3(nn.Module):
                 )
                 self._turbo_custom_decoders[decoder_key] = custom_decoder
             custom_cache_position = custom_decoder.load_cache(past_key_values)
-        if dynamic_decode:
+        if dynamic_decode or hybrid_decode_after is not None:
             decoder_key = (dynamic_cache_dtype, dynamic_compile)
             dynamic_decoder = self._turbo_dynamic_decoders.get(decoder_key)
             if dynamic_decoder is None:
@@ -567,13 +577,22 @@ class T3(nn.Module):
                     compile_decode=dynamic_compile,
                 )
                 self._turbo_dynamic_decoders[decoder_key] = dynamic_decoder
-            dynamic_decoder.load_cache(past_key_values)
+            if dynamic_decode:
+                dynamic_decoder.load_cache(past_key_values)
+                dynamic_decoder_loaded = True
 
         stopped_on_eos = False
-        for _ in tqdm(range(max_gen_len), disable=not show_progress):
+        for decode_step in tqdm(range(max_gen_len), disable=not show_progress):
             current_speech_embed = self.speech_emb(current_speech_token)
 
-            if dynamic_decoder is not None:
+            if (
+                hybrid_decode_after is not None
+                and decode_step == hybrid_decode_after
+            ):
+                dynamic_decoder.load_cache(past_key_values)
+                dynamic_decoder_loaded = True
+
+            if dynamic_decoder_loaded:
                 hidden_states = dynamic_decoder(current_speech_embed)
             elif custom_decoder is None:
                 llm_outputs = native_decode(

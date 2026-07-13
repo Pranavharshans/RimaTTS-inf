@@ -67,12 +67,26 @@ class TurboOptimizedApiTest(unittest.TestCase):
             t3_dynamic_decode=True,
             t3_dynamic_cache_dtype="float32",
             t3_dynamic_compile=False,
+            t3_hybrid_decode_after=None,
         )
 
         kwargs = self.model.t3.inference_turbo.call_args.kwargs
         self.assertTrue(kwargs["dynamic_decode"])
         self.assertEqual(kwargs["dynamic_cache_dtype"], "float32")
         self.assertFalse(kwargs["dynamic_compile"])
+        self.assertFalse(kwargs["custom_decode"])
+        self.assertFalse(kwargs["compile_native_decode"])
+        self.assertIsNone(kwargs["hybrid_decode_after"])
+
+    def test_hybrid_decode_options_reach_turbo_t3(self):
+        self.model.generate(
+            "hybrid decode API test",
+            t3_hybrid_decode_after=192,
+        )
+
+        kwargs = self.model.t3.inference_turbo.call_args.kwargs
+        self.assertEqual(kwargs["hybrid_decode_after"], 192)
+        self.assertFalse(kwargs["dynamic_decode"])
         self.assertFalse(kwargs["custom_decode"])
         self.assertFalse(kwargs["compile_native_decode"])
 
