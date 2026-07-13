@@ -13,8 +13,10 @@
 **Chatterbox** is a family of state-of-the-art, open-source text-to-speech models by Resemble AI.
 
 > **RimaTTS-inf** adds an exact-output CUDA-graph inference path for the regular
-> English Chatterbox model. Turbo and multilingual inference are unchanged.
-> See [the experiment ledger](./exp.md) for every accepted and rejected result.
+> English Chatterbox model. Turbo optimization is tracked independently in
+> [the Turbo experiment ledger](./exp_turbo.md); multilingual inference is unchanged.
+> See [the regular experiment ledger](./exp.md) for every accepted and rejected
+> regular-model result.
 
 ## Latest Release: Chatterbox Multilingual V3
 
