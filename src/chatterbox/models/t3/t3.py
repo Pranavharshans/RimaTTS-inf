@@ -442,7 +442,7 @@ class T3(nn.Module):
 
     @torch.inference_mode()
     def inference_turbo(self, t3_cond, text_tokens, temperature=0.8, top_k=1000, top_p=0.95, repetition_penalty=1.2,
-                        max_gen_len=1000):
+                        max_gen_len=1000, optimize_loop=False, show_progress=True):
 
         logits_processors = LogitsProcessorList()
         if temperature > 0 and temperature != 1.0:
@@ -463,7 +463,13 @@ class T3(nn.Module):
             cfg_weight=0.0,
         )
 
-        generated_speech_tokens = []
+        if optimize_loop:
+            generated_speech_tokens = torch.empty(
+                text_tokens.size(0), max_gen_len + 1, dtype=torch.long, device=self.device
+            )
+            generated_length = 0
+        else:
+            generated_speech_tokens = []
 
         llm_outputs = self.tfmr(
             inputs_embeds=embeds,
@@ -480,10 +486,16 @@ class T3(nn.Module):
         probs = F.softmax(processed_logits, dim=-1)
         next_speech_token = torch.multinomial(probs, num_samples=1)
 
-        generated_speech_tokens.append(next_speech_token)
+        if optimize_loop:
+            generated_speech_tokens[:, generated_length : generated_length + 1].copy_(
+                next_speech_token
+            )
+            generated_length += 1
+        else:
+            generated_speech_tokens.append(next_speech_token)
         current_speech_token = next_speech_token
 
-        for _ in tqdm(range(max_gen_len)):
+        for _ in tqdm(range(max_gen_len), disable=not show_progress):
             current_speech_embed = self.speech_emb(current_speech_token)
 
             llm_outputs = self.tfmr(
@@ -496,7 +508,11 @@ class T3(nn.Module):
             past_key_values = llm_outputs.past_key_values
             speech_logits = self.speech_head(hidden_states)
 
-            input_ids = torch.cat(generated_speech_tokens, dim=1)
+            input_ids = (
+                generated_speech_tokens[:, :generated_length]
+                if optimize_loop
+                else torch.cat(generated_speech_tokens, dim=1)
+            )
             processed_logits = logits_processors(input_ids, speech_logits[:, -1, :])
             if torch.all(processed_logits == -float("inf")):
                 print("Warning: All logits are -inf")
@@ -505,12 +521,22 @@ class T3(nn.Module):
             probs = F.softmax(processed_logits, dim=-1)
             next_speech_token = torch.multinomial(probs, num_samples=1)
 
-            generated_speech_tokens.append(next_speech_token)
+            if optimize_loop:
+                generated_speech_tokens[:, generated_length : generated_length + 1].copy_(
+                    next_speech_token
+                )
+                generated_length += 1
+            else:
+                generated_speech_tokens.append(next_speech_token)
             current_speech_token = next_speech_token
             if torch.all(next_speech_token == self.hp.stop_speech_token):
                 break
 
-        all_tokens = torch.cat(generated_speech_tokens, dim=1)
+        all_tokens = (
+            generated_speech_tokens[:, :generated_length]
+            if optimize_loop
+            else torch.cat(generated_speech_tokens, dim=1)
+        )
 
         # Remove EOS token if present
         if all_tokens.size(1) > 0 and all_tokens[0, -1] == self.hp.stop_speech_token:

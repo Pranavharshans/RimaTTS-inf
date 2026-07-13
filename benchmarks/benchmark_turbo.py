@@ -308,6 +308,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--t3-matmul-precision", choices=("highest", "high"), default="highest"
     )
+    parser.add_argument("--optimize-t3-loop", action="store_true")
+    parser.add_argument("--hide-progress", action="store_true")
     return parser.parse_args()
 
 
@@ -321,6 +323,11 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     model = ChatterboxTurboTTS.from_pretrained(device="cuda")
     timed_model = TimedTurboModel(model, t3_matmul_precision=args.t3_matmul_precision)
+    generation_kwargs = {
+        **SAMPLING,
+        "t3_optimize_loop": args.optimize_t3_loop,
+        "show_progress": not args.hide_progress,
+    }
 
     payload: dict[str, Any] = {
         "label": args.label,
@@ -343,6 +350,8 @@ def main() -> None:
             "runs": args.runs,
             "base_seed": args.seed,
             "t3_matmul_precision": args.t3_matmul_precision,
+            "optimize_t3_loop": args.optimize_t3_loop,
+            "show_progress": not args.hide_progress,
             "sampling": {**SAMPLING, "watermark": True, "s3gen_cfm_steps": 2},
             "conditioning": "checkpoint built-in voice",
             "reference_dir": str(args.reference_dir) if args.reference_dir else None,
@@ -360,7 +369,7 @@ def main() -> None:
             for warmup in range(args.warmups):
                 torch.manual_seed(case_seed)
                 timed_model.reset()
-                model.generate(prompt, **SAMPLING)
+                model.generate(prompt, **generation_kwargs)
                 synchronize()
                 print(f"  warmup {warmup + 1}/{args.warmups} complete")
 
@@ -373,7 +382,7 @@ def main() -> None:
                 torch.cuda.reset_peak_memory_stats()
                 synchronize()
                 started = time.perf_counter()
-                audio = model.generate(prompt, **SAMPLING)
+                audio = model.generate(prompt, **generation_kwargs)
                 synchronize()
                 e2e_ms = (time.perf_counter() - started) * 1000.0
 

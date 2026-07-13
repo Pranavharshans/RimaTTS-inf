@@ -257,6 +257,8 @@ class ChatterboxTurboTTS:
         temperature=0.8,
         top_k=1000,
         norm_loudness=True,
+        t3_optimize_loop=False,
+        show_progress=True,
     ):
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration, norm_loudness=norm_loudness)
@@ -278,6 +280,8 @@ class ChatterboxTurboTTS:
             top_k=top_k,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
+            optimize_loop=t3_optimize_loop,
+            show_progress=show_progress,
         )
 
         # Remove OOV tokens and add silence to end
