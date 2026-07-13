@@ -349,3 +349,17 @@ The compiler specifically recommends calling
 `torch.compiler.cudagraph_mark_step_begin()` before each model invocation or
 cloning outputs outside the compiled region. The next attempt will test the
 step marker first because it adds no arithmetic or KV copy.
+
+#### EXP-010b: explicit CUDA-graph step markers
+
+- Implementation commit: `d6df466`.
+- Change: call `torch.compiler.cudagraph_mark_step_begin()` immediately before
+  every compiled decode invocation in `reduce-overhead` mode.
+- Result: rejected. The first warmup fails with the same overwritten graph
+  output error at the dynamic K/V cache update, so the marker does not express
+  the cross-step cache lifetime sufficiently for this model. No benchmark
+  metrics or output tokens were produced.
+
+The remaining compiler-prescribed path is to clone the K/V graph outputs after
+each invocation and before they are reused. That adds a full cache copy per
+token, so it will be evaluated as a smoke benchmark before any full run.
