@@ -12,6 +12,10 @@
 
 **Chatterbox** is a family of state-of-the-art, open-source text-to-speech models by Resemble AI.
 
+> **RimaTTS-inf** adds an exact-output CUDA-graph inference path for the regular
+> English Chatterbox model. Turbo and multilingual inference are unchanged.
+> See [the experiment ledger](./exp.md) for every accepted and rejected result.
+
 ## Latest Release: Chatterbox Multilingual V3
 
 **Chatterbox Multilingual V3** is the latest general-purpose multilingual TTS model in the Chatterbox family. It keeps the same 0.5B model size while improving speaker similarity, reducing hallucinations, and producing more natural, conversational speech across languages.
@@ -54,13 +58,67 @@ Alternatively, you can install from source:
 # conda create -yn chatterbox python=3.11
 # conda activate chatterbox
 
-git clone https://github.com/resemble-ai/chatterbox.git
-cd chatterbox
+git clone https://github.com/Pranavharshans/RimaTTS-inf.git
+cd RimaTTS-inf
 pip install -e .
 ```
 We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions of the dependencies are pinned in `pyproject.toml` to ensure consistency. You can modify the code or dependencies in this installation mode.
 
 ## Usage
+
+##### Optimized regular English inference
+
+The fastest verified RTX 3090 configuration keeps the checkpoint, sampling,
+S3Gen decoder, and watermark unchanged. It uses FP32 tensors with TF32 matmuls,
+TorchInductor, and CUDA graphs for T3 decode.
+
+```shell
+export TORCHINDUCTOR_CACHE_DIR="$PWD/.torchinductor"
+```
+
+```python
+import torch
+import torchaudio as ta
+from chatterbox.tts import ChatterboxTTS
+
+model = ChatterboxTTS.from_pretrained(device="cuda")
+text = "This request uses the optimized regular English inference path."
+
+fast_t3 = {
+    "compile_t3_decode": True,
+    "t3_compile_mode": "reduce-overhead",
+    "t3_matmul_precision": "high",
+    "show_progress": False,
+}
+
+# The first call compiles kernels and captures graph shapes. Resetting the seed
+# makes this representative warmup follow the same generated-token path.
+torch.manual_seed(0)
+model.generate(text, **fast_t3)
+
+torch.manual_seed(0)
+wav = model.generate(text, **fast_t3)
+ta.save("optimized-english.wav", wav, model.sr)
+```
+
+CUDA graphs are captured per observed cache shape and live only for the current
+process. Warm representative short, medium, and long prompts before serving
+latency-sensitive traffic. A persistent `TORCHINDUCTOR_CACHE_DIR` avoids
+recompiling generated kernels after process restarts, but CUDA-graph capture
+still occurs in each new process.
+
+RTX 3090 results use two warmups and five measured runs per prompt:
+
+| Case | Baseline E2E | Optimized E2E | Baseline T3 | Optimized T3 | Baseline tok/s | Optimized tok/s | Optimized RTF |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Short | 2694.75 ms | 1153.42 ms | 2009.22 ms | 448.17 ms | 27.87 | 124.98 | 0.5243 |
+| Medium | 6617.03 ms | 2096.30 ms | 5876.48 ms | 1357.96 ms | 27.58 | 119.32 | 0.3255 |
+| Long | 24876.00 ms | 6620.37 ms | 23701.25 ms | 5488.09 ms | 20.80 | 89.65 | 0.3371 |
+
+All three fixed-seed speech-token tensors and final watermarked WAV files are
+byte-identical to the untouched baseline. Initial compile/capture latency is
+excluded from the table; broad shape warmup used approximately 8 GiB of total
+GPU process memory. See `example_tts_optimized.py` for a runnable example.
 
 ##### Chatterbox-Turbo
 

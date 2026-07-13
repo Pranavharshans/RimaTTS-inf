@@ -460,3 +460,23 @@ NVIDIA process memory reached approximately 8.0 GiB after capturing all prompt
 shape sets in this run. The per-run PyTorch peak allocation remains unchanged
 at 3.16-3.50 GiB. The all-TF32 policy also removes the mid-generation precision
 switch, so it is simpler to expose as the optimized public configuration.
+
+### EXP-012: public optimized API validation
+
+- Implementation commit: `6261a3b`.
+- Change: expose compile mode, matmul precision, adaptive TF32, and progress
+  control through `ChatterboxTTS.generate()`. Refactor the benchmark so timing
+  wrappers only measure calls and all optimization settings enter through this
+  public method.
+- Runs: two warmups and two measured short runs using the EXP-011 settings.
+- Result: retained; public API wiring validated with the exact EXP-000 token
+  hash.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short smoke | 1177.25 +/- 13.68 | 41.16 +/- 0.18 | 466.39 +/- 16.97 | 683.30 +/- 2.55 | 2.200 | 0.5351 +/- 0.0062 | 56 | 120.15 +/- 4.37 | 3164.4 |
+
+The two T3 samples were 478.40 ms at 117.06 tokens/s and 454.39 ms at
+123.24 tokens/s. They are within the run-to-run range of EXP-011 and prove that
+the published API executes the same exact-output CUDA-graph path instead of a
+benchmark-only monkeypatch.
