@@ -363,3 +363,26 @@ step marker first because it adds no arithmetic or KV copy.
 The remaining compiler-prescribed path is to clone the K/V graph outputs after
 each invocation and before they are reused. That adds a full cache copy per
 token, so it will be evaluated as a smoke benchmark before any full run.
+
+#### EXP-010c: clone dynamic K/V outputs outside the CUDA graph
+
+- Implementation commit: `8b1b486`.
+- Change: after each `reduce-overhead` decode, clone every initialized dynamic
+  cache layer's K and V tensors before the next graph invocation. Keep the step
+  boundary from EXP-010b after logits sampling.
+- Runs: two warmups and two measured short runs.
+- Result: successful exact-token short smoke; full evaluation pending.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short smoke | 1296.10 +/- 129.71 | 49.91 +/- 7.29 | 506.42 +/- 50.51 | 762.41 +/- 76.00 | 2.200 | 0.5891 +/- 0.0590 | 56 | 111.13 +/- 11.08 | 3164.4 |
+
+The two T3 samples were 542.14 ms at 103.29 tokens/s and 470.70 ms at
+118.97 tokens/s. The token hash exactly matches EXP-000:
+`22c2f704d30e1070065f4331ccdc77fca479fa5453511c7785be8604c17ca76c`.
+
+TorchInductor warned that dynamic shapes require a separate CUDA graph for each
+distinct input size and reported at least nine shapes during warmup. The next
+gate is therefore not only throughput: medium and long runs must establish
+capture startup cost, graph count, and memory practicality before this path can
+replace EXP-009.
