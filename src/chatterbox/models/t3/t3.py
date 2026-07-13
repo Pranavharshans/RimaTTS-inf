@@ -605,9 +605,13 @@ class T3(nn.Module):
             )
         if hybrid_decode_after is not None and hybrid_decode_after < 1:
             raise ValueError("hybrid_decode_after must be positive")
-        if native_compile_mode not in ("default", "max-autotune-no-cudagraphs"):
+        if native_compile_mode not in (
+            "default",
+            "reduce-overhead",
+            "max-autotune-no-cudagraphs",
+        ):
             raise ValueError(
-                "native_compile_mode must be default or "
+                "native_compile_mode must be default, reduce-overhead, or "
                 "max-autotune-no-cudagraphs"
             )
         if compile_native_decode or hybrid_decode_after is not None:

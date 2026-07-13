@@ -321,7 +321,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--compile-native-t3-decode", action="store_true")
     parser.add_argument(
         "--native-t3-compile-mode",
-        choices=("default", "max-autotune-no-cudagraphs"),
+        choices=("default", "reduce-overhead", "max-autotune-no-cudagraphs"),
         default="default",
     )
     parser.add_argument("--compile-native-t3-step", action="store_true")
