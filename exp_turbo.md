@@ -194,3 +194,27 @@ the untouched baseline's 638.59/1730.28/5947.03 ms. The remaining EOS scalar
 read still synchronizes each iteration; removing the earlier guard changes when
 the host waits but does not shorten the dependent GPU work. This mode is not
 part of the recommended path.
+
+### EXP-T005: FP32 preallocated dynamic-length KV cache
+
+- Implementation commit: `b210046`.
+- Change: replace per-token DynamicCache concatenation with fixed-capacity FP32
+  K/V allocations, in-place writes, and populated-prefix views. Attention still
+  uses the Transformers SDPA path and receives no padded future positions.
+  Sampling, S3Gen, and watermark are unchanged. Progress rendering is hidden.
+- Runs: two warmups and five measured runs per prompt.
+- Result: rejected for performance; exact-output quality gate passed.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 770.98 +/- 4.91 | 22.00 +/- 0.04 | 661.68 +/- 4.62 | 94.91 +/- 0.45 | 2.720 | 0.2834 +/- 0.0018 | 65 | 98.24 +/- 0.68 | 3012.3 |
+| Medium | 1958.29 +/- 6.70 | 21.95 +/- 0.09 | 1808.35 +/- 7.21 | 112.15 +/- 1.31 | 7.360 | 0.2661 +/- 0.0009 | 181 | 100.09 +/- 0.40 | 3016.4 |
+| Long | 6700.90 +/- 44.89 | 22.58 +/- 0.08 | 6243.53 +/- 35.98 | 267.84 +/- 0.80 | 25.080 | 0.2672 +/- 0.0018 | 624 | 99.95 +/- 0.58 | 3419.0 |
+
+Every token and float-waveform tensor exactly matches EXP-T000 with maximum
+absolute audio difference `0.0`. T3 latency is 661.68/1808.35/6243.53 ms versus
+the untouched baseline's 638.59/1730.28/5947.03 ms. A populated prefix of a
+max-length `[B,H,T,D]` allocation keeps the maximum-length stride between heads;
+the resulting non-contiguous attention input costs more than the avoided K/V
+concatenations save. Preallocation also raises short-case peak allocation from
+2824.9 to 3012.3 MiB. This mode is not part of the recommended path.
