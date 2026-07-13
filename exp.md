@@ -599,3 +599,19 @@ frequency tensor in this PyTorch 2.12 build. T3 position IDs always have batch
 size one and the pre-expanded tensor is already on the model device, so the
 last narrow attempt will remove the redundant `expand()` and `.to()` calls and
 pass the pre-shaped tensor directly into the same FP32 matmul.
+
+#### EXP-015d: direct pre-shaped frequency tensor
+
+- Implementation commit: `e62ae40`.
+- Change: feed the already shaped, device-resident frequency parameter directly
+  into the unchanged RoPE matmul without indexing, expansion, or transfer.
+- Result: rejected. The first compile warmup still raises the same storage
+  weak-reference error, now at the matmul itself. No metrics or tokens were
+  produced.
+
+This exhausts the narrow in-graph fixes: this AOTAutograd build cannot consume
+the captured RoPE frequency storage in any tested registration or shape form.
+The experimental parameter and custom RoPE mutations will be removed. The next
+model-specific path will reproduce the existing Llama forward boundary exactly:
+prepare causal mask and RoPE eagerly, then pass those ordinary output tensors
+to one compiled transformer-layer core.
