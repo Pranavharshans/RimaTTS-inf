@@ -438,3 +438,25 @@ The two T3 samples were 456.71 ms at 122.62 tokens/s and 439.29 ms at
 CUDA-graph replay removes enough launch overhead for the tensor-core matmul
 path to improve short decode. Medium and long fixtures remain required before
 this precision policy can replace EXP-010's adaptive threshold.
+
+#### EXP-011 full benchmark
+
+- Runs: two warmups and five measured runs per prompt.
+- Result: retained as the new fastest exact-audio configuration.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 1153.42 +/- 9.11 | 40.53 +/- 0.81 | 448.17 +/- 7.76 | 672.49 +/- 2.11 | 2.200 | 0.5243 +/- 0.0041 | 56 | 124.98 +/- 2.12 | 3164.4 |
+| Medium | 2096.30 +/- 24.77 | 45.92 +/- 6.78 | 1357.96 +/- 23.55 | 684.53 +/- 6.55 | 6.440 | 0.3255 +/- 0.0038 | 162 | 119.32 +/- 2.05 | 3243.8 |
+| Long | 6620.37 +/- 47.17 | 43.34 +/- 1.55 | 5488.09 +/- 39.32 | 1023.99 +/- 3.46 | 19.640 | 0.3371 +/- 0.0024 | 492 | 89.65 +/- 0.64 | 3503.0 |
+
+All speech-token and WAV SHA-256 hashes exactly match EXP-000 and EXP-010.
+Compared with EXP-010, all-TF32 lowers T3 from 472.70 ms to 448.17 ms on
+short, 1416.71 ms to 1357.96 ms on medium, and 5589.07 ms to 5488.09 ms on
+long. End-to-end means fall from 1217.62 ms to 1153.42 ms, 2203.27 ms to
+2096.30 ms, and 6736.75 ms to 6620.37 ms respectively.
+
+NVIDIA process memory reached approximately 8.0 GiB after capturing all prompt
+shape sets in this run. The per-run PyTorch peak allocation remains unchanged
+at 3.16-3.50 GiB. The all-TF32 policy also removes the mid-generation precision
+switch, so it is simpler to expose as the optimized public configuration.
