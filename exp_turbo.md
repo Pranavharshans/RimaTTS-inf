@@ -436,3 +436,22 @@ audio difference `0.0`. The single-run T3 result is effectively tied with the
 five-run BF16-from-prefill result, while short and medium requests below the
 switch threshold continue to use the faster EXP-T009 path. A full benchmark is
 deferred until the earliest exact transition point is identified.
+
+### EXP-T014: FP32-to-BF16 hybrid at decode token 224
+
+- Implementation commit: `97de8be`.
+- Change: move the hybrid cache conversion from decode token 256 to token 224.
+- Qualification: one warmup and one measured canonical long-prompt run.
+- Result: retained as the new exact-output hybrid candidate.
+
+| Path | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| EXP-T000 baseline | 6384.64 | 22.87 | 5947.03 | 268.56 | 25.080 | 0.2546 | 624 | 104.93 | 3419.0 |
+| EXP-T010 BF16 from prefill | 4222.88 | 22.62 | 3753.36 | 266.86 | 25.080 | 0.1684 | 624 | 166.29 | 3522.1 |
+| EXP-T013 hybrid at 256 | 4159.72 | 22.82 | 3757.60 | 268.72 | 25.080 | 0.1659 | 624 | 166.06 | 3520.9 |
+| EXP-T014 hybrid at 224 | 4128.75 | 22.79 | 3697.99 | 268.90 | 25.080 | 0.1646 | 624 | 168.74 | 3522.5 |
+
+The token and waveform hashes exactly match EXP-T000 and maximum absolute audio
+difference remains `0.0`. This is the fastest valid hybrid qualification so far,
+although the one-run result still requires a full repeated benchmark after the
+transition boundary search is complete.
