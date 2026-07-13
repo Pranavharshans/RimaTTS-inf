@@ -489,3 +489,18 @@ Tokens and waveform exactly match EXP-T000 with maximum absolute audio
 difference `0.0`. This run's TTFT is `39.71` ms instead of the otherwise stable
 approximately `22.7` ms, and the whole run is correspondingly noisy. It is used
 only to establish that token 200 preserves output, not to rank performance.
+
+### EXP-T017: FP32-to-BF16 hybrid at decode token 196
+
+- Implementation commit: `97de8be`.
+- Change: move the hybrid cache conversion from decode token 200 to token 196.
+- Qualification: one warmup and one measured canonical long-prompt run.
+- Result: exact-output gate passed; retained for boundary search only.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Long | 4233.05 | 22.85 | 3796.71 | 268.62 | 25.080 | 0.1688 | 624 | 164.35 | 3521.3 |
+
+Tokens and waveform exactly match EXP-T000 with maximum absolute audio
+difference `0.0`. The valid/invalid transition now lies between tokens 192 and
+196; timing remains qualification-only until that boundary is resolved.
