@@ -411,6 +411,8 @@ class T3(nn.Module):
                     torch.set_float32_matmul_precision("high")
 
                 # Forward pass with only the new token and the cached past.
+                if compile_decode and compile_mode == "reduce-overhead":
+                    torch.compiler.cudagraph_mark_step_begin()
                 output = decode_forward(
                     inputs_embeds=next_token_embed,
                     past_key_values=past,
