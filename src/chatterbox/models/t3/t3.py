@@ -250,6 +250,7 @@ class T3(nn.Module):
         tf32_after_tokens: Optional[int] = None,
         compile_decode: bool = False,
         compile_mode: str = "default",
+        show_progress: bool = True,
     ):
         """
         Args:
@@ -369,7 +370,12 @@ class T3(nn.Module):
 
         # ---- Generation Loop using kv_cache ----
         try:
-            for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
+            for i in tqdm(
+                range(max_new_tokens),
+                desc="Sampling",
+                dynamic_ncols=True,
+                disable=not show_progress,
+            ):
                 logits_step = output.logits[:, -1, :]
                 # CFG combine  → (1, V)
                 cond   = logits_step[0:1, :]

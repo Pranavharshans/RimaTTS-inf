@@ -215,6 +215,11 @@ class ChatterboxTTS:
         exaggeration=0.5,
         cfg_weight=0.5,
         temperature=0.8,
+        compile_t3_decode=False,
+        t3_compile_mode="default",
+        t3_matmul_precision=None,
+        t3_tf32_after_tokens=None,
+        show_progress=True,
     ):
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
@@ -242,17 +247,32 @@ class ChatterboxTTS:
         text_tokens = F.pad(text_tokens, (1, 0), value=sot)
         text_tokens = F.pad(text_tokens, (0, 1), value=eot)
 
+        if t3_matmul_precision not in {None, "highest", "high", "medium"}:
+            raise ValueError(f"Unsupported t3_matmul_precision: {t3_matmul_precision}")
+
         with torch.inference_mode():
-            speech_tokens = self.t3.inference(
-                t3_cond=self.conds.t3,
-                text_tokens=text_tokens,
-                max_new_tokens=1000,  # TODO: use the value in config
-                temperature=temperature,
-                cfg_weight=cfg_weight,
-                repetition_penalty=repetition_penalty,
-                min_p=min_p,
-                top_p=top_p,
-            )
+            original_matmul_precision = None
+            if t3_matmul_precision is not None:
+                original_matmul_precision = torch.get_float32_matmul_precision()
+                torch.set_float32_matmul_precision(t3_matmul_precision)
+            try:
+                speech_tokens = self.t3.inference(
+                    t3_cond=self.conds.t3,
+                    text_tokens=text_tokens,
+                    max_new_tokens=1000,  # TODO: use the value in config
+                    temperature=temperature,
+                    cfg_weight=cfg_weight,
+                    repetition_penalty=repetition_penalty,
+                    min_p=min_p,
+                    top_p=top_p,
+                    compile_decode=compile_t3_decode,
+                    compile_mode=t3_compile_mode,
+                    tf32_after_tokens=t3_tf32_after_tokens,
+                    show_progress=show_progress,
+                )
+            finally:
+                if original_matmul_precision is not None:
+                    torch.set_float32_matmul_precision(original_matmul_precision)
             # Extract only the conditional batch.
             speech_tokens = speech_tokens[0]
 

@@ -20,7 +20,6 @@ import soundfile as sf
 import torch
 
 from chatterbox.tts import ChatterboxTTS
-import chatterbox.models.t3.t3 as t3_module
 
 
 PROMPTS = {
@@ -71,19 +70,8 @@ def tensor_sha256(tensor: torch.Tensor) -> str:
 class TimedModel:
     """Install measurement-only wrappers around the existing model methods."""
 
-    def __init__(
-        self,
-        model: ChatterboxTTS,
-        t3_matmul_precision: str,
-        t3_tf32_after_tokens: int | None,
-        compile_t3_decode: bool,
-        t3_compile_mode: str,
-    ):
+    def __init__(self, model: ChatterboxTTS):
         self.model = model
-        self.t3_matmul_precision = t3_matmul_precision
-        self.t3_tf32_after_tokens = t3_tf32_after_tokens
-        self.compile_t3_decode = compile_t3_decode
-        self.t3_compile_mode = t3_compile_mode
         self.metrics: dict[str, Any] = {}
         self._t3_inference = model.t3.inference
         self._s3gen_inference = model.s3gen.inference
@@ -103,10 +91,8 @@ class TimedModel:
 
     def _timed_t3(self, *args: Any, **kwargs: Any) -> torch.Tensor:
         original_multinomial = torch.multinomial
-        original_matmul_precision = torch.get_float32_matmul_precision()
         ttft_ms: float | None = None
 
-        torch.set_float32_matmul_precision(self.t3_matmul_precision)
         synchronize()
         started = time.perf_counter()
 
@@ -120,14 +106,9 @@ class TimedModel:
 
         torch.multinomial = timed_multinomial
         try:
-            if self.t3_tf32_after_tokens is not None:
-                kwargs["tf32_after_tokens"] = self.t3_tf32_after_tokens
-            kwargs["compile_decode"] = self.compile_t3_decode
-            kwargs["compile_mode"] = self.t3_compile_mode
             tokens = self._t3_inference(*args, **kwargs)
         finally:
             torch.multinomial = original_multinomial
-            torch.set_float32_matmul_precision(original_matmul_precision)
 
         synchronize()
         self.metrics["t3_ms"] = (time.perf_counter() - started) * 1000.0
@@ -269,17 +250,16 @@ def main() -> None:
         model.t3.to(dtype=torch.bfloat16)
         model.conds.t3.to(dtype=torch.bfloat16)
 
-    # The upstream progress bar writes once per generated token and perturbs CPU loop timing.
-    t3_module.tqdm = lambda iterable, *unused_args, **unused_kwargs: iterable
     if args.t3_tf32_after_tokens is not None and args.t3_tf32_after_tokens < 1:
         raise ValueError("--t3-tf32-after-tokens must be positive")
-    timed_model = TimedModel(
-        model,
-        t3_matmul_precision=args.t3_matmul_precision,
-        t3_tf32_after_tokens=args.t3_tf32_after_tokens,
-        compile_t3_decode=args.compile_t3_decode,
-        t3_compile_mode=args.t3_compile_mode,
-    )
+    timed_model = TimedModel(model)
+    generation_kwargs = {
+        "t3_matmul_precision": args.t3_matmul_precision,
+        "t3_tf32_after_tokens": args.t3_tf32_after_tokens,
+        "compile_t3_decode": args.compile_t3_decode,
+        "t3_compile_mode": args.t3_compile_mode,
+        "show_progress": False,
+    }
 
     payload: dict[str, Any] = {
         "label": args.label,
@@ -326,7 +306,7 @@ def main() -> None:
             for warmup in range(args.warmups):
                 torch.manual_seed(case_seed)
                 timed_model.reset()
-                model.generate(prompt)
+                model.generate(prompt, **generation_kwargs)
                 synchronize()
                 print(f"  warmup {warmup + 1}/{args.warmups} complete")
 
@@ -339,7 +319,7 @@ def main() -> None:
                 torch.cuda.reset_peak_memory_stats()
                 synchronize()
                 started = time.perf_counter()
-                audio = model.generate(prompt)
+                audio = model.generate(prompt, **generation_kwargs)
                 synchronize()
                 e2e_ms = (time.perf_counter() - started) * 1000.0
 
