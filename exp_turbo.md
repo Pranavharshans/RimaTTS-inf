@@ -644,3 +644,26 @@ and becomes highly variable as sequence length grows. Combining dynamic-cache
 attention and sort/top-k logits kernels in one graph prevents the compiler from
 maintaining the efficient schedule produced by the smaller graph boundaries.
 This mode remains opt-in for reproducibility and is not recommended.
+
+### EXP-T024: max-autotuned strict FP32 native decode
+
+- Implementation commit: `cd52d39`.
+- Change: run EXP-T021 with Inductor's `max-autotune-no-cudagraphs` mode,
+  enabling Triton/ATen GEMM candidate benchmarking and coordinate-descent
+  tuning while retaining FP32, full-graph dynamic decode, separate compiled
+  logits, and disabled CUDA graphs.
+- Qualification: one warmup and one measured short run, then one warmup and one
+  measured long run. Medium was skipped after both endpoints regressed.
+- Result: rejected for performance; exact-output gate passed.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 493.23 | 21.94 | 388.46 | 90.96 | 2.720 | 0.1813 | 65 | 167.33 | 2895.6 |
+| Long | 4756.01 | 22.91 | 4347.18 | 269.36 | 25.080 | 0.1896 | 624 | 143.54 | 3419.0 |
+
+Both token and waveform tensors exactly match EXP-T000 with maximum absolute
+audio difference `0.0`. Autotuning selected a no-TF32 Triton `addmm` kernel
+after several candidates exceeded the RTX 3090's register/resource limit. The
+selected schedule is slower than EXP-T021 on both short (`388.46` versus
+`375.18` ms T3) and long (`4347.18` versus `4088.59` ms), so default Inductor
+code generation remains preferred.
