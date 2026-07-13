@@ -45,8 +45,19 @@ class TurboOptimizedApiTest(unittest.TestCase):
         self.assertTrue(kwargs["custom_decode"])
         self.assertEqual(kwargs["custom_cache_dtype"], "bfloat16")
         self.assertFalse(kwargs["custom_compile"])
+        self.assertFalse(kwargs["compile_native_decode"])
         self.assertFalse(kwargs["show_progress"])
         self.assertEqual(tuple(wav.shape), (1, 16))
+
+    def test_native_compile_option_reaches_turbo_t3(self):
+        self.model.generate(
+            "native compile API test",
+            t3_compile_native_decode=True,
+        )
+
+        kwargs = self.model.t3.inference_turbo.call_args.kwargs
+        self.assertTrue(kwargs["compile_native_decode"])
+        self.assertFalse(kwargs["custom_decode"])
 
 
 if __name__ == "__main__":

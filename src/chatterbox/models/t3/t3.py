@@ -90,6 +90,7 @@ class T3(nn.Module):
         self._compiled_decode_callables = {}
         self._compile_rotary_disabled = False
         self._turbo_custom_decoders = {}
+        self._turbo_native_decode_callables = {}
 
     @property
     def device(self):
@@ -448,6 +449,7 @@ class T3(nn.Module):
                         max_gen_len=1000, optimize_loop=False, optimize_sync=False,
                         preallocate_kv=False, custom_decode=False,
                         custom_cache_dtype="float32", custom_compile=True,
+                        compile_native_decode=False,
                         show_progress=True):
 
         logits_processors = LogitsProcessorList()
@@ -512,6 +514,19 @@ class T3(nn.Module):
 
         custom_decoder = None
         custom_cache_position = 0
+        native_decode = self.tfmr.forward
+        if custom_decode and compile_native_decode:
+            raise ValueError("custom_decode and compile_native_decode are mutually exclusive")
+        if compile_native_decode:
+            compile_key = "fullgraph_dynamic_no_cudagraphs"
+            if compile_key not in self._turbo_native_decode_callables:
+                self._turbo_native_decode_callables[compile_key] = torch.compile(
+                    self.tfmr.forward,
+                    dynamic=True,
+                    fullgraph=True,
+                    options={"triton.cudagraphs": False},
+                )
+            native_decode = self._turbo_native_decode_callables[compile_key]
         if custom_decode:
             required_cache_len = embeds.size(1) + max_gen_len
             decoder_key = (
@@ -539,7 +554,7 @@ class T3(nn.Module):
             current_speech_embed = self.speech_emb(current_speech_token)
 
             if custom_decoder is None:
-                llm_outputs = self.tfmr(
+                llm_outputs = native_decode(
                     inputs_embeds=current_speech_embed,
                     past_key_values=past_key_values,
                     use_cache=True

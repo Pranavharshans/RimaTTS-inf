@@ -318,6 +318,7 @@ def parse_args() -> argparse.Namespace:
         default="float32",
     )
     parser.add_argument("--custom-t3-eager", action="store_true")
+    parser.add_argument("--compile-native-t3-decode", action="store_true")
     parser.add_argument("--hide-progress", action="store_true")
     return parser.parse_args()
 
@@ -340,6 +341,7 @@ def main() -> None:
         "t3_custom_decode": args.custom_t3_decode,
         "t3_custom_cache_dtype": args.custom_t3_cache_dtype,
         "t3_custom_compile": not args.custom_t3_eager,
+        "t3_compile_native_decode": args.compile_native_t3_decode,
         "show_progress": not args.hide_progress,
     }
 
@@ -370,6 +372,7 @@ def main() -> None:
             "custom_t3_decode": args.custom_t3_decode,
             "custom_t3_cache_dtype": args.custom_t3_cache_dtype,
             "custom_t3_compile": not args.custom_t3_eager,
+            "compile_native_t3_decode": args.compile_native_t3_decode,
             "show_progress": not args.hide_progress,
             "sampling": {**SAMPLING, "watermark": True, "s3gen_cfm_steps": 2},
             "conditioning": "checkpoint built-in voice",

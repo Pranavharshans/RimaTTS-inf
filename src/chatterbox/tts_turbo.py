@@ -263,6 +263,7 @@ class ChatterboxTurboTTS:
         t3_custom_decode=False,
         t3_custom_cache_dtype="float32",
         t3_custom_compile=True,
+        t3_compile_native_decode=False,
         show_progress=True,
     ):
         if audio_prompt_path:
@@ -291,6 +292,7 @@ class ChatterboxTurboTTS:
             custom_decode=t3_custom_decode,
             custom_cache_dtype=t3_custom_cache_dtype,
             custom_compile=t3_custom_compile,
+            compile_native_decode=t3_compile_native_decode,
             show_progress=show_progress,
         )
 
