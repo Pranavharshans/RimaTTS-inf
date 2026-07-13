@@ -520,3 +520,19 @@ Tokens and waveform exactly match EXP-T000 with maximum absolute audio
 difference `0.0`. TTFT is another isolated outlier and this one-run timing is
 not used for ranking. Token 193 is the only remaining boundary point between
 this valid result and the rejected token-192 transition.
+
+### EXP-T019: FP32-to-BF16 hybrid at decode token 193
+
+- Implementation commit: `97de8be`.
+- Change: move the hybrid cache conversion from decode token 194 to token 193.
+- Qualification: one warmup and one measured canonical long-prompt run.
+- Result: exact-output gate passed; earliest valid boundary for this workload.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Long | 4137.45 | 22.74 | 3700.81 | 267.95 | 25.080 | 0.1650 | 624 | 168.61 | 3521.3 |
+
+Tokens and waveform exactly match EXP-T000 with maximum absolute audio
+difference `0.0`. Token 192 is rejected and token 193 passes, so no earlier
+integer transition remains to test for this deterministic benchmark. Token 193
+advances to the full short/medium/long repeated benchmark.
