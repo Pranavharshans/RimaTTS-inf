@@ -416,3 +416,23 @@ and the audio hash is
 exactly matching EXP-T000 with maximum absolute audio difference `0.0`.
 This threshold is valid but still slower on the long case than BF16 decode from
 prefill, so an earlier exact switch remains worth testing.
+
+### EXP-T013: FP32-to-BF16 hybrid at decode token 256
+
+- Implementation commit: `97de8be`.
+- Change: move the hybrid cache conversion from decode token 320 to token 256.
+- Qualification: one warmup and one measured canonical long-prompt run.
+- Result: retained as the new exact-output hybrid candidate.
+
+| Path | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| EXP-T000 baseline | 6384.64 | 22.87 | 5947.03 | 268.56 | 25.080 | 0.2546 | 624 | 104.93 | 3419.0 |
+| EXP-T009 FP32 compiled | 4616.80 | 27.40 | 4160.13 | 268.47 | 25.080 | 0.1841 | 624 | 150.00 | 3419.0 |
+| EXP-T010 BF16 from prefill | 4222.88 | 22.62 | 3753.36 | 266.86 | 25.080 | 0.1684 | 624 | 166.29 | 3522.1 |
+| EXP-T013 hybrid at 256 | 4159.72 | 22.82 | 3757.60 | 268.72 | 25.080 | 0.1659 | 624 | 166.06 | 3520.9 |
+
+Tokens and waveform are bit-exact against EXP-T000, including maximum absolute
+audio difference `0.0`. The single-run T3 result is effectively tied with the
+five-run BF16-from-prefill result, while short and medium requests below the
+switch threshold continue to use the faster EXP-T009 path. A full benchmark is
+deferred until the earliest exact transition point is identified.
