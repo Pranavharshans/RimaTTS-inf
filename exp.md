@@ -324,3 +324,28 @@ This path has no checkpoint, sampling, decoder-step, precision, or watermark
 change. Exact sampled speech-token identity across all prompts is the primary
 quality gate. The deployment tradeoff is startup compilation latency and a
 persistent TorchInductor cache, not generated-audio quality.
+
+### EXP-010: `reduce-overhead` CUDA-graph capture, initial attempt
+
+- Compile-mode support commit: `4486d4a`.
+- Change: replace EXP-009's `mode="default"` with
+  `mode="reduce-overhead"`, which enables TorchInductor CUDA graphs. No model,
+  precision, cache, or sampling change.
+- Workload: short smoke benchmark with compiler performance hints enabled.
+- Result: failed during the first warmup; no latency result is reported.
+
+TorchInductor began CUDA-graph execution but raised:
+
+```text
+RuntimeError: accessing tensor output of CUDAGraphs that has been overwritten
+by a subsequent run
+```
+
+The reported source is Transformers' dynamic cache update, where each layer
+assigns `torch.cat([self.values, value_states], dim=-2)`. The concatenated K/V
+tensors are graph outputs and become inputs to the next decode invocation, but
+the graph's static output storage is reused before that lifetime is understood.
+The compiler specifically recommends calling
+`torch.compiler.cudagraph_mark_step_begin()` before each model invocation or
+cloning outputs outside the compiled region. The next attempt will test the
+step marker first because it adds no arithmetic or KV copy.
