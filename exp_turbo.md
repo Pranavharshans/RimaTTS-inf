@@ -366,3 +366,30 @@ absolute audio difference `0.0`. Against EXP-T009, T3 is slower on short
 faster on long (`3753.36` versus `4160.13` ms). The BF16 conversion has a fixed
 cost and becomes worthwhile only after the attention sequence grows. EXP-T009
 remains the general recommended mode; EXP-T010 motivates a late-switch hybrid.
+
+### EXP-T011: FP32-to-BF16 hybrid at decode token 192
+
+- Implementation commit: `97de8be`.
+- Change: use the exact-output EXP-T009 native compiled FP32 decoder for the
+  first 192 decode iterations, then convert the accumulated AR self-attention
+  K/V cache to contiguous BF16 and continue with the EXP-T010 decoder. All
+  weights, projections, logits, sampling, S3Gen, and watermark remain FP32.
+- Qualification: one warmup and one measured canonical long-prompt run.
+- Result: rejected by the exact-output quality gate.
+
+| Path | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| EXP-T000 baseline | 6384.64 | 22.87 | 5947.03 | 268.56 | 25.080 | 0.2546 | 624 | 104.93 | 3419.0 |
+| EXP-T009 FP32 compiled | 4616.80 | 27.40 | 4160.13 | 268.47 | 25.080 | 0.1841 | 624 | 150.00 | 3419.0 |
+| EXP-T010 BF16 from prefill | 4222.88 | 22.62 | 3753.36 | 266.86 | 25.080 | 0.1684 | 624 | 166.29 | 3522.1 |
+| EXP-T011 hybrid at 192 | 4027.14 | 22.74 | 3572.54 | 266.00 | 24.760 | 0.1626 | 616 | 172.43 | 3508.4 |
+
+The timed run was deterministic, but it ended at 616 tokens instead of the
+baseline's 624. Its token hash was
+`bd39b01e80ff9355f1fecb8d5a949e47ff54ea350768497e3fb9def250fc5fe7`
+instead of
+`e22a7ab72ba83a76c57a376deb555f9d5d59155705124d80caca95f4548ec265`;
+the waveform shape and hash also differed. The lower E2E time and RTF are
+therefore partly caused by generating shorter audio and are not accepted as a
+performance improvement. A late cache conversion can perturb the sampling
+trajectory even though BF16 decode from prefill passed the same exact gate.
