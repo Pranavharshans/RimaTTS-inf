@@ -25,6 +25,7 @@ from .modules.t3_config import T3Config
 from .llama_configs import LLAMA_CONFIGS
 from .inference.t3_hf_backend import T3HuggingfaceBackend
 from .preallocated_cache import PreallocatedDynamicCache
+from .turbo_gpt2_decode import TurboGPT2Decoder
 from ..utils import AttrDict
 
 
@@ -88,6 +89,7 @@ class T3(nn.Module):
         self.patched_model = None
         self._compiled_decode_callables = {}
         self._compile_rotary_disabled = False
+        self._turbo_custom_decoders = {}
 
     @property
     def device(self):
@@ -444,7 +446,9 @@ class T3(nn.Module):
     @torch.inference_mode()
     def inference_turbo(self, t3_cond, text_tokens, temperature=0.8, top_k=1000, top_p=0.95, repetition_penalty=1.2,
                         max_gen_len=1000, optimize_loop=False, optimize_sync=False,
-                        preallocate_kv=False, show_progress=True):
+                        preallocate_kv=False, custom_decode=False,
+                        custom_cache_dtype="float32", custom_compile=True,
+                        show_progress=True):
 
         logits_processors = LogitsProcessorList()
         if temperature > 0 and temperature != 1.0:
@@ -506,18 +510,48 @@ class T3(nn.Module):
             generated_speech_tokens.append(next_speech_token)
         current_speech_token = next_speech_token
 
+        custom_decoder = None
+        custom_cache_position = 0
+        if custom_decode:
+            required_cache_len = embeds.size(1) + max_gen_len
+            decoder_key = (
+                text_tokens.size(0),
+                custom_cache_dtype,
+                custom_compile,
+            )
+            custom_decoder = self._turbo_custom_decoders.get(decoder_key)
+            if (
+                custom_decoder is None
+                or custom_decoder.max_cache_len < required_cache_len
+            ):
+                custom_decoder = TurboGPT2Decoder(
+                    self.tfmr,
+                    batch_size=text_tokens.size(0),
+                    max_cache_len=max(2048, required_cache_len),
+                    cache_dtype=custom_cache_dtype,
+                    compile_decode=custom_compile,
+                )
+                self._turbo_custom_decoders[decoder_key] = custom_decoder
+            custom_cache_position = custom_decoder.load_cache(past_key_values)
+
         stopped_on_eos = False
         for _ in tqdm(range(max_gen_len), disable=not show_progress):
             current_speech_embed = self.speech_emb(current_speech_token)
 
-            llm_outputs = self.tfmr(
-                inputs_embeds=current_speech_embed,
-                past_key_values=past_key_values,
-                use_cache=True
-            )
-
-            hidden_states = llm_outputs[0]
-            past_key_values = llm_outputs.past_key_values
+            if custom_decoder is None:
+                llm_outputs = self.tfmr(
+                    inputs_embeds=current_speech_embed,
+                    past_key_values=past_key_values,
+                    use_cache=True
+                )
+                hidden_states = llm_outputs[0]
+                past_key_values = llm_outputs.past_key_values
+            else:
+                hidden_states = custom_decoder(
+                    current_speech_embed,
+                    custom_cache_position,
+                )
+                custom_cache_position += current_speech_embed.size(1)
             speech_logits = self.speech_head(hidden_states)
 
             input_ids = (

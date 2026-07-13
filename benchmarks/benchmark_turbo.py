@@ -311,6 +311,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--optimize-t3-loop", action="store_true")
     parser.add_argument("--optimize-t3-sync", action="store_true")
     parser.add_argument("--preallocate-t3-kv", action="store_true")
+    parser.add_argument("--custom-t3-decode", action="store_true")
+    parser.add_argument(
+        "--custom-t3-cache-dtype",
+        choices=("float32", "bfloat16"),
+        default="float32",
+    )
+    parser.add_argument("--custom-t3-eager", action="store_true")
     parser.add_argument("--hide-progress", action="store_true")
     return parser.parse_args()
 
@@ -330,6 +337,9 @@ def main() -> None:
         "t3_optimize_loop": args.optimize_t3_loop,
         "t3_optimize_sync": args.optimize_t3_sync,
         "t3_preallocate_kv": args.preallocate_t3_kv,
+        "t3_custom_decode": args.custom_t3_decode,
+        "t3_custom_cache_dtype": args.custom_t3_cache_dtype,
+        "t3_custom_compile": not args.custom_t3_eager,
         "show_progress": not args.hide_progress,
     }
 
@@ -357,6 +367,9 @@ def main() -> None:
             "optimize_t3_loop": args.optimize_t3_loop,
             "optimize_t3_sync": args.optimize_t3_sync,
             "preallocate_t3_kv": args.preallocate_t3_kv,
+            "custom_t3_decode": args.custom_t3_decode,
+            "custom_t3_cache_dtype": args.custom_t3_cache_dtype,
+            "custom_t3_compile": not args.custom_t3_eager,
             "show_progress": not args.hide_progress,
             "sampling": {**SAMPLING, "watermark": True, "s3gen_cfm_steps": 2},
             "conditioning": "checkpoint built-in voice",

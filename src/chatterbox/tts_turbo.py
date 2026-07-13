@@ -260,6 +260,9 @@ class ChatterboxTurboTTS:
         t3_optimize_loop=False,
         t3_optimize_sync=False,
         t3_preallocate_kv=False,
+        t3_custom_decode=False,
+        t3_custom_cache_dtype="float32",
+        t3_custom_compile=True,
         show_progress=True,
     ):
         if audio_prompt_path:
@@ -285,6 +288,9 @@ class ChatterboxTurboTTS:
             optimize_loop=t3_optimize_loop,
             optimize_sync=t3_optimize_sync,
             preallocate_kv=t3_preallocate_kv,
+            custom_decode=t3_custom_decode,
+            custom_cache_dtype=t3_custom_cache_dtype,
+            custom_compile=t3_custom_compile,
             show_progress=show_progress,
         )
 

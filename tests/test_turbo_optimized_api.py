@@ -32,6 +32,9 @@ class TurboOptimizedApiTest(unittest.TestCase):
             t3_optimize_loop=True,
             t3_optimize_sync=True,
             t3_preallocate_kv=True,
+            t3_custom_decode=True,
+            t3_custom_cache_dtype="bfloat16",
+            t3_custom_compile=False,
             show_progress=False,
         )
 
@@ -39,6 +42,9 @@ class TurboOptimizedApiTest(unittest.TestCase):
         self.assertTrue(kwargs["optimize_loop"])
         self.assertTrue(kwargs["optimize_sync"])
         self.assertTrue(kwargs["preallocate_kv"])
+        self.assertTrue(kwargs["custom_decode"])
+        self.assertEqual(kwargs["custom_cache_dtype"], "bfloat16")
+        self.assertFalse(kwargs["custom_compile"])
         self.assertFalse(kwargs["show_progress"])
         self.assertEqual(tuple(wav.shape), (1, 16))
 
