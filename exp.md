@@ -480,3 +480,32 @@ The two T3 samples were 478.40 ms at 117.06 tokens/s and 454.39 ms at
 123.24 tokens/s. They are within the run-to-run range of EXP-011 and prove that
 the published API executes the same exact-output CUDA-graph path instead of a
 benchmark-only monkeypatch.
+
+### EXP-013: optimized CUDA-graph kernel profile
+
+- Profiler commit: `9fcfe64`.
+- Workload: T3-only short prompt after two EXP-011 warmups, with PyTorch CPU and
+  CUDA operator tracing enabled.
+- Quality check: 56 tokens with the exact EXP-000 hash.
+- Result: diagnostic accepted; profiler execution time is not a latency result.
+
+| Operator/group | Calls | CUDA total ms | CPU total ms |
+|---|---:|---:|---:|
+| Compiled transformer graph | 55 | 280.33 | 179.05 |
+| K/V and graph copies (`aten::copy_`) | 7,337 | 21.26 | 134.91 |
+| K/V graph-output clones (`aten::clone`) | 3,412 | 10.38 | 103.68 |
+| CUDA graph launches | 220 | 9.23 | 70.81 |
+| Eager matmul outside graph | 213 | 7.31 | 13.57 |
+| Multinomial sampling | 56 | 1.75 | 22.69 |
+| Eager attention outside graph/prefill | 32 | 0.58 | 2.38 |
+
+Inside graph replay, CUTLASS tensor-core matmuls consume approximately
+180.49 ms and FP32 memory-efficient attention consumes 41.28 ms. The graph is
+already using generated Triton fusion kernels for normalization, activation,
+mask, and cache-related elementwise sequences.
+
+The actionable overhead outside the graph is cache ownership: cloning 30 K and
+30 V tensors after each decode creates roughly 3,300 clone dispatches for a
+56-token request. The next experiment will copy those identically shaped
+tensors into one stacked contiguous allocation per step and assign contiguous
+views back to the cache, preserving values while collapsing dispatch count.
