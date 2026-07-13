@@ -700,6 +700,11 @@ class T3(nn.Module):
                     )
                     hidden_states = llm_outputs[0]
                     past_key_values = llm_outputs.past_key_values
+                    if native_compile_mode == "reduce-overhead":
+                        for layer in past_key_values.layers:
+                            if layer.is_initialized:
+                                layer.keys = layer.keys.clone()
+                                layer.values = layer.values.clone()
                 else:
                     hidden_states = custom_decoder(
                         current_speech_embed,
