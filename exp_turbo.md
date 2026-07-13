@@ -473,3 +473,19 @@ Tokens and waveform remain bit-exact with maximum absolute audio difference
 `0.0`. The slower single sample relative to token 224 is within the scale of
 run-to-run clock and kernel variation seen on this host, so threshold selection
 will use repeated measurements after the exact-output boundary is known.
+
+### EXP-T016: FP32-to-BF16 hybrid at decode token 200
+
+- Implementation commit: `97de8be`.
+- Change: move the hybrid cache conversion from decode token 208 to token 200.
+- Qualification: one warmup and one measured canonical long-prompt run.
+- Result: exact-output gate passed; retained for boundary search only.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Long | 4355.13 | 39.71 | 3882.25 | 267.81 | 25.080 | 0.1736 | 624 | 160.73 | 3526.6 |
+
+Tokens and waveform exactly match EXP-T000 with maximum absolute audio
+difference `0.0`. This run's TTFT is `39.71` ms instead of the otherwise stable
+approximately `22.7` ms, and the whole run is correspondingly noisy. It is used
+only to establish that token 200 preserves output, not to rank performance.
