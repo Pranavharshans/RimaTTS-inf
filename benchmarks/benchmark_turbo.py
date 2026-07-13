@@ -309,6 +309,7 @@ def parse_args() -> argparse.Namespace:
         "--t3-matmul-precision", choices=("highest", "high"), default="highest"
     )
     parser.add_argument("--optimize-t3-loop", action="store_true")
+    parser.add_argument("--optimize-t3-sync", action="store_true")
     parser.add_argument("--hide-progress", action="store_true")
     return parser.parse_args()
 
@@ -326,6 +327,7 @@ def main() -> None:
     generation_kwargs = {
         **SAMPLING,
         "t3_optimize_loop": args.optimize_t3_loop,
+        "t3_optimize_sync": args.optimize_t3_sync,
         "show_progress": not args.hide_progress,
     }
 
@@ -351,6 +353,7 @@ def main() -> None:
             "base_seed": args.seed,
             "t3_matmul_precision": args.t3_matmul_precision,
             "optimize_t3_loop": args.optimize_t3_loop,
+            "optimize_t3_sync": args.optimize_t3_sync,
             "show_progress": not args.hide_progress,
             "sampling": {**SAMPLING, "watermark": True, "s3gen_cfm_steps": 2},
             "conditioning": "checkpoint built-in voice",

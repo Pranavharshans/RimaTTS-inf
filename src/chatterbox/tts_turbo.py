@@ -258,6 +258,7 @@ class ChatterboxTurboTTS:
         top_k=1000,
         norm_loudness=True,
         t3_optimize_loop=False,
+        t3_optimize_sync=False,
         show_progress=True,
     ):
         if audio_prompt_path:
@@ -281,6 +282,7 @@ class ChatterboxTurboTTS:
             top_p=top_p,
             repetition_penalty=repetition_penalty,
             optimize_loop=t3_optimize_loop,
+            optimize_sync=t3_optimize_sync,
             show_progress=show_progress,
         )
 

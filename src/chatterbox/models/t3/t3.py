@@ -442,7 +442,8 @@ class T3(nn.Module):
 
     @torch.inference_mode()
     def inference_turbo(self, t3_cond, text_tokens, temperature=0.8, top_k=1000, top_p=0.95, repetition_penalty=1.2,
-                        max_gen_len=1000, optimize_loop=False, show_progress=True):
+                        max_gen_len=1000, optimize_loop=False, optimize_sync=False,
+                        show_progress=True):
 
         logits_processors = LogitsProcessorList()
         if temperature > 0 and temperature != 1.0:
@@ -495,6 +496,7 @@ class T3(nn.Module):
             generated_speech_tokens.append(next_speech_token)
         current_speech_token = next_speech_token
 
+        stopped_on_eos = False
         for _ in tqdm(range(max_gen_len), disable=not show_progress):
             current_speech_embed = self.speech_emb(current_speech_token)
 
@@ -514,7 +516,7 @@ class T3(nn.Module):
                 else torch.cat(generated_speech_tokens, dim=1)
             )
             processed_logits = logits_processors(input_ids, speech_logits[:, -1, :])
-            if torch.all(processed_logits == -float("inf")):
+            if not optimize_sync and torch.all(processed_logits == -float("inf")):
                 print("Warning: All logits are -inf")
                 break
 
@@ -529,7 +531,13 @@ class T3(nn.Module):
             else:
                 generated_speech_tokens.append(next_speech_token)
             current_speech_token = next_speech_token
-            if torch.all(next_speech_token == self.hp.stop_speech_token):
+            if optimize_sync and next_speech_token.numel() == 1:
+                stopped_on_eos = next_speech_token.item() == self.hp.stop_speech_token
+            else:
+                stopped_on_eos = bool(
+                    torch.all(next_speech_token == self.hp.stop_speech_token).item()
+                )
+            if stopped_on_eos:
                 break
 
         all_tokens = (
@@ -539,7 +547,11 @@ class T3(nn.Module):
         )
 
         # Remove EOS token if present
-        if all_tokens.size(1) > 0 and all_tokens[0, -1] == self.hp.stop_speech_token:
+        if stopped_on_eos or (
+            not optimize_sync
+            and all_tokens.size(1) > 0
+            and all_tokens[0, -1] == self.hp.stop_speech_token
+        ):
             all_tokens = all_tokens[:, :-1]
 
         return all_tokens

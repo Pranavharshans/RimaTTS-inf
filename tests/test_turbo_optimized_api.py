@@ -30,11 +30,13 @@ class TurboOptimizedApiTest(unittest.TestCase):
         wav = self.model.generate(
             "public Turbo API test",
             t3_optimize_loop=True,
+            t3_optimize_sync=True,
             show_progress=False,
         )
 
         kwargs = self.model.t3.inference_turbo.call_args.kwargs
         self.assertTrue(kwargs["optimize_loop"])
+        self.assertTrue(kwargs["optimize_sync"])
         self.assertFalse(kwargs["show_progress"])
         self.assertEqual(tuple(wav.shape), (1, 16))
 
