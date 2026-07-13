@@ -569,3 +569,18 @@ when it is indexed inside the graph. The next attempt will expose the same
 tensor as a frozen parameter only for the compiled runtime path, which uses
 AOTAutograd's supported parameter-input mechanism without changing values or
 operations.
+
+#### EXP-015b: frozen `inv_freq` parameter
+
+- Implementation commit: `c0e9e47`.
+- Change: move the exact `inv_freq` tensor from a non-persistent buffer to a
+  non-trainable parameter before compiling the undecorated default RoPE.
+- Result: rejected. AOTAutograd fails at the same first warmup with the same
+  `UntypedStorage` weak-reference error; the failing FX node is still the
+  `self.inv_freq[None, :, None]` indexing operation, now identified as a
+  parameter instead of a buffer. No metrics or tokens were produced.
+
+The registration type is therefore not the cause. The next attempt will create
+the exact `[1, head_dim / 2, 1]` expanded frequency tensor once before tracing
+and use a default-RoPE forward that avoids this unsupported indexing node while
+leaving all subsequent FP32 arithmetic unchanged.
