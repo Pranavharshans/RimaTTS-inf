@@ -731,3 +731,25 @@ but it remains slower than EXP-T021's `4088.59` ms T3 and `152.62` tokens/s.
 Even 64 iterations launch and allocate 48 separate full-prefix K/V clones per
 token; reducing those copies to one packed operation is required before CUDA
 graphs can be reconsidered.
+
+### EXP-T028: packed CUDA graph cache handoff
+
+- Implementation commit: `f47a588`.
+- Change: replace EXP-T026's 48 independent per-layer K/V clones with one
+  `torch.stack` copy and contiguous per-layer views into shared packed storage.
+  Cache values, FP32 dtype, shapes, attention inputs, and model behavior are
+  unchanged. A unit test checks exact values, contiguity, and shared storage.
+- Qualification: two warmups and one measured short run, then two warmups and
+  one measured long run.
+- Result: unbounded replay rejected; packed handoff retained for bounded tests.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 464.26 | 22.43 | 357.17 | 92.45 | 2.720 | 0.1707 | 65 | 181.99 | 2824.2 |
+| Long | 5194.30 | 22.58 | 4727.25 | 267.30 | 25.080 | 0.2071 | 624 | 132.00 | 3419.9 |
+
+Both outputs exactly match EXP-T000 tokens and waveform tensors with maximum
+absolute audio difference `0.0`. Packing improves the prior cloned-cache short
+T3 from `366.88` to `357.17` ms and long from `4806.11` to `4727.25` ms. Short
+now beats EXP-T021 by `18.01` ms T3, but 624 full-prefix packed copies still
+make unbounded long replay much slower than EXP-T021's `4088.59` ms.
