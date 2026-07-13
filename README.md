@@ -111,9 +111,9 @@ RTX 3090 results use two warmups and five measured runs per prompt:
 
 | Case | Baseline E2E | Optimized E2E | Baseline T3 | Optimized T3 | Baseline tok/s | Optimized tok/s | Optimized RTF |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Short | 2694.75 ms | 1153.42 ms | 2009.22 ms | 448.17 ms | 27.87 | 124.98 | 0.5243 |
-| Medium | 6617.03 ms | 2096.30 ms | 5876.48 ms | 1357.96 ms | 27.58 | 119.32 | 0.3255 |
-| Long | 24876.00 ms | 6620.37 ms | 23701.25 ms | 5488.09 ms | 20.80 | 89.65 | 0.3371 |
+| Short | 2694.75 ms | 1122.73 ms | 2009.22 ms | 434.91 ms | 27.87 | 128.80 | 0.5103 |
+| Medium | 6617.03 ms | 2070.48 ms | 5876.48 ms | 1343.21 ms | 27.58 | 120.62 | 0.3215 |
+| Long | 24876.00 ms | 6583.55 ms | 23701.25 ms | 5451.26 ms | 20.80 | 90.27 | 0.3352 |
 
 All three fixed-seed speech-token tensors and final watermarked WAV files are
 byte-identical to the untouched baseline. Initial compile/capture latency is

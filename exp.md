@@ -672,3 +672,21 @@ Short T3 is 1.33 ms below EXP-011, which is too small to distinguish from run
 variance alone. The change is retained for a full run because it is a proven
 identity transform, removes one full-vocabulary sort per token, preserves the
 non-default path, and has no memory penalty.
+
+#### EXP-018 full benchmark
+
+- Runs: two warmups and five measured runs per prompt.
+- Result: retained as the new fastest exact-audio configuration.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 1122.73 +/- 8.02 | 39.89 +/- 0.45 | 434.91 +/- 8.18 | 662.32 +/- 3.17 | 2.200 | 0.5103 +/- 0.0036 | 56 | 128.80 +/- 2.36 | 3164.2 |
+| Medium | 2070.48 +/- 21.63 | 41.25 +/- 2.42 | 1343.21 +/- 17.62 | 680.40 +/- 5.97 | 6.440 | 0.3215 +/- 0.0034 | 162 | 120.62 +/- 1.59 | 3243.6 |
+| Long | 6583.55 +/- 83.90 | 46.38 +/- 8.32 | 5451.26 +/- 84.43 | 1020.48 +/- 2.22 | 19.640 | 0.3352 +/- 0.0043 | 492 | 90.27 +/- 1.37 | 3503.0 |
+
+Every token and WAV SHA-256 hash exactly matches EXP-000. Compared with
+EXP-011, T3 falls from 448.17 ms to 434.91 ms on short, 1357.96 ms to
+1343.21 ms on medium, and 5488.09 ms to 5451.26 ms on long. End-to-end means
+fall from 1153.42 ms to 1122.73 ms, 2096.30 ms to 2070.48 ms, and 6620.37 ms
+to 6583.55 ms respectively. This identity bypass is retained in the final
+public configuration.
