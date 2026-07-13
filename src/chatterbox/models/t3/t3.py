@@ -39,6 +39,21 @@ def _ensure_BOT_EOT(text_tokens: Tensor, hp):
     assert (text_tokens == hp.stop_text_token).int().sum() >= B, "missing stop_text_token"
 
 
+def _pack_cudagraph_cache_outputs(past_key_values):
+    initialized_layers = [
+        layer for layer in past_key_values.layers if layer.is_initialized
+    ]
+    cache_tensors = []
+    for layer in initialized_layers:
+        cache_tensors.extend((layer.keys, layer.values))
+    if not cache_tensors:
+        return
+    packed_cache = torch.stack(cache_tensors, dim=0)
+    for layer_index, layer in enumerate(initialized_layers):
+        layer.keys = packed_cache[layer_index * 2]
+        layer.values = packed_cache[layer_index * 2 + 1]
+
+
 class T3(nn.Module):
     """
     Token-To-Token (T3) TTS model using huggingface transformer models as backbones,
@@ -736,10 +751,7 @@ class T3(nn.Module):
                     hidden_states = llm_outputs[0]
                     past_key_values = llm_outputs.past_key_values
                     if use_cudagraph:
-                        for layer in past_key_values.layers:
-                            if layer.is_initialized:
-                                layer.keys = layer.keys.clone()
-                                layer.values = layer.values.clone()
+                        _pack_cudagraph_cache_outputs(past_key_values)
                 else:
                     hidden_states = custom_decoder(
                         current_speech_embed,
