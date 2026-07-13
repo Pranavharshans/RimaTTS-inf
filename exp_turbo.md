@@ -753,3 +753,21 @@ absolute audio difference `0.0`. Packing improves the prior cloned-cache short
 T3 from `366.88` to `357.17` ms and long from `4806.11` to `4727.25` ms. Short
 now beats EXP-T021 by `18.01` ms T3, but 624 full-prefix packed copies still
 make unbounded long replay much slower than EXP-T021's `4088.59` ms.
+
+### EXP-T029: packed 64-step CUDA graph window
+
+- Implementation commits: `d07a22e`, `f47a588`.
+- Change: combine the bounded first-64-step graph window from EXP-T027 with
+  EXP-T028's single packed K/V handoff, then use EXP-T021 default decode for all
+  remaining iterations.
+- Qualification: two warmups and one measured canonical long run.
+- Result: rejected for performance; exact-output gate passed.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Long | 4549.43 | 22.73 | 4119.09 | 266.97 | 25.080 | 0.1814 | 624 | 151.49 | 3419.0 |
+
+Tokens and waveform exactly match EXP-T000 with maximum absolute audio
+difference `0.0`. Packing improves the earlier 64-step result from `4135.26`
+to `4119.09` ms T3, but it remains slower than EXP-T021's five-run `4088.59`
+ms mean. A 32-step crossover check follows; the 64-step window is not retained.
