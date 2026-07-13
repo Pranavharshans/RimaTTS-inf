@@ -393,3 +393,26 @@ the waveform shape and hash also differed. The lower E2E time and RTF are
 therefore partly caused by generating shorter audio and are not accepted as a
 performance improvement. A late cache conversion can perturb the sampling
 trajectory even though BF16 decode from prefill passed the same exact gate.
+
+### EXP-T012: FP32-to-BF16 hybrid at decode token 320
+
+- Implementation commit: `97de8be`.
+- Change: repeat the hybrid qualification with the cache conversion delayed
+  from decode token 192 to token 320.
+- Qualification: one warmup and one measured canonical long-prompt run.
+- Result: retained as an exact-output hybrid candidate.
+
+| Path | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| EXP-T000 baseline | 6384.64 | 22.87 | 5947.03 | 268.56 | 25.080 | 0.2546 | 624 | 104.93 | 3419.0 |
+| EXP-T009 FP32 compiled | 4616.80 | 27.40 | 4160.13 | 268.47 | 25.080 | 0.1841 | 624 | 150.00 | 3419.0 |
+| EXP-T010 BF16 from prefill | 4222.88 | 22.62 | 3753.36 | 266.86 | 25.080 | 0.1684 | 624 | 166.29 | 3522.1 |
+| EXP-T012 hybrid at 320 | 4345.50 | 22.74 | 3925.26 | 267.92 | 25.080 | 0.1733 | 624 | 158.97 | 3522.2 |
+
+The generated token hash is
+`e22a7ab72ba83a76c57a376deb555f9d5d59155705124d80caca95f4548ec265`
+and the audio hash is
+`739b09408460a41e481aa72bee70b776afb424117a4c89a21ebce7d1289a26b7`,
+exactly matching EXP-T000 with maximum absolute audio difference `0.0`.
+This threshold is valid but still slower on the long case than BF16 decode from
+prefill, so an earlier exact switch remains worth testing.
