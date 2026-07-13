@@ -454,6 +454,7 @@ class T3(nn.Module):
                         preallocate_kv=False, custom_decode=False,
                         custom_cache_dtype="float32", custom_compile=True,
                         compile_native_decode=False,
+                        native_compile_mode="default",
                         compile_native_step=False,
                         dynamic_decode=False, dynamic_cache_dtype="bfloat16",
                         dynamic_compile=True,
@@ -604,14 +605,25 @@ class T3(nn.Module):
             )
         if hybrid_decode_after is not None and hybrid_decode_after < 1:
             raise ValueError("hybrid_decode_after must be positive")
+        if native_compile_mode not in ("default", "max-autotune-no-cudagraphs"):
+            raise ValueError(
+                "native_compile_mode must be default or "
+                "max-autotune-no-cudagraphs"
+            )
         if compile_native_decode or hybrid_decode_after is not None:
-            compile_key = "fullgraph_dynamic_no_cudagraphs"
+            compile_key = f"fullgraph_dynamic_{native_compile_mode}"
             if compile_key not in self._turbo_native_decode_callables:
+                compile_kwargs = {
+                    "dynamic": True,
+                    "fullgraph": True,
+                }
+                if native_compile_mode == "default":
+                    compile_kwargs["options"] = {"triton.cudagraphs": False}
+                else:
+                    compile_kwargs["mode"] = native_compile_mode
                 self._turbo_native_decode_callables[compile_key] = torch.compile(
                     self.tfmr.forward,
-                    dynamic=True,
-                    fullgraph=True,
-                    options={"triton.cudagraphs": False},
+                    **compile_kwargs,
                 )
             native_decode = self._turbo_native_decode_callables[compile_key]
         if custom_decode:
