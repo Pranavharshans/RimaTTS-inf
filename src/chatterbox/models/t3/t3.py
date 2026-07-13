@@ -92,6 +92,7 @@ class T3(nn.Module):
         self._compile_rotary_disabled = False
         self._turbo_custom_decoders = {}
         self._turbo_native_decode_callables = {}
+        self._turbo_native_step_callables = {}
         self._turbo_dynamic_decoders = {}
         self._turbo_logits_callables = {}
 
@@ -453,6 +454,7 @@ class T3(nn.Module):
                         preallocate_kv=False, custom_decode=False,
                         custom_cache_dtype="float32", custom_compile=True,
                         compile_native_decode=False,
+                        compile_native_step=False,
                         dynamic_decode=False, dynamic_cache_dtype="bfloat16",
                         dynamic_compile=True,
                         hybrid_decode_after=None,
@@ -486,6 +488,41 @@ class T3(nn.Module):
                     options={"triton.cudagraphs": False},
                 )
                 self._turbo_logits_callables[logits_key] = compiled_logits
+
+        native_step = None
+        if compile_native_step:
+            if compile_logits:
+                raise ValueError(
+                    "compile_native_step already includes logits processing"
+                )
+            step_key = (temperature, top_k, top_p, repetition_penalty)
+            native_step = self._turbo_native_step_callables.get(step_key)
+            if native_step is None:
+                step_logits = TurboLogitsProcessor(
+                    temperature=temperature,
+                    top_k=top_k,
+                    top_p=top_p,
+                    repetition_penalty=repetition_penalty,
+                )
+
+                def native_step_fn(current_token, input_ids, past_key_values):
+                    current_embed = self.speech_emb(current_token)
+                    outputs = self.tfmr.forward(
+                        inputs_embeds=current_embed,
+                        past_key_values=past_key_values,
+                        use_cache=True,
+                    )
+                    speech_logits = self.speech_head(outputs[0])[:, -1, :]
+                    processed_logits, probs = step_logits(input_ids, speech_logits)
+                    return processed_logits, probs, outputs.past_key_values
+
+                native_step = torch.compile(
+                    native_step_fn,
+                    dynamic=True,
+                    fullgraph=True,
+                    options={"triton.cudagraphs": False},
+                )
+                self._turbo_native_step_callables[step_key] = native_step
 
 
         speech_start_token = self.hp.start_speech_token * torch.ones_like(text_tokens[:, :1])
@@ -555,14 +592,15 @@ class T3(nn.Module):
             (
                 custom_decode,
                 compile_native_decode,
+                compile_native_step,
                 dynamic_decode,
                 hybrid_decode_after is not None,
             )
         )
         if selected_decode_modes > 1:
             raise ValueError(
-                "custom_decode, compile_native_decode, dynamic_decode, and "
-                "hybrid_decode_after are mutually exclusive"
+                "custom_decode, compile_native_decode, compile_native_step, "
+                "dynamic_decode, and hybrid_decode_after are mutually exclusive"
             )
         if hybrid_decode_after is not None and hybrid_decode_after < 1:
             raise ValueError("hybrid_decode_after must be positive")
@@ -613,49 +651,61 @@ class T3(nn.Module):
 
         stopped_on_eos = False
         for decode_step in tqdm(range(max_gen_len), disable=not show_progress):
-            current_speech_embed = self.speech_emb(current_speech_token)
-
-            if (
-                hybrid_decode_after is not None
-                and decode_step == hybrid_decode_after
-            ):
-                dynamic_decoder.load_cache(past_key_values)
-                dynamic_decoder_loaded = True
-
-            if dynamic_decoder_loaded:
-                hidden_states = dynamic_decoder(current_speech_embed)
-            elif custom_decoder is None:
-                llm_outputs = native_decode(
-                    inputs_embeds=current_speech_embed,
-                    past_key_values=past_key_values,
-                    use_cache=True
+            if native_step is not None:
+                input_ids = (
+                    generated_speech_tokens[:, :generated_length]
+                    if optimize_loop
+                    else torch.cat(generated_speech_tokens, dim=1)
                 )
-                hidden_states = llm_outputs[0]
-                past_key_values = llm_outputs.past_key_values
-            else:
-                hidden_states = custom_decoder(
-                    current_speech_embed,
-                    custom_cache_position,
-                )
-                custom_cache_position += current_speech_embed.size(1)
-            speech_logits = self.speech_head(hidden_states)
-
-            input_ids = (
-                generated_speech_tokens[:, :generated_length]
-                if optimize_loop
-                else torch.cat(generated_speech_tokens, dim=1)
-            )
-            if compiled_logits is None:
-                processed_logits = logits_processors(
+                processed_logits, probs, past_key_values = native_step(
+                    current_speech_token,
                     input_ids,
-                    speech_logits[:, -1, :],
+                    past_key_values,
                 )
-                probs = F.softmax(processed_logits, dim=-1)
             else:
-                processed_logits, probs = compiled_logits(
-                    input_ids,
-                    speech_logits[:, -1, :],
+                current_speech_embed = self.speech_emb(current_speech_token)
+
+                if (
+                    hybrid_decode_after is not None
+                    and decode_step == hybrid_decode_after
+                ):
+                    dynamic_decoder.load_cache(past_key_values)
+                    dynamic_decoder_loaded = True
+
+                if dynamic_decoder_loaded:
+                    hidden_states = dynamic_decoder(current_speech_embed)
+                elif custom_decoder is None:
+                    llm_outputs = native_decode(
+                        inputs_embeds=current_speech_embed,
+                        past_key_values=past_key_values,
+                        use_cache=True
+                    )
+                    hidden_states = llm_outputs[0]
+                    past_key_values = llm_outputs.past_key_values
+                else:
+                    hidden_states = custom_decoder(
+                        current_speech_embed,
+                        custom_cache_position,
+                    )
+                    custom_cache_position += current_speech_embed.size(1)
+                speech_logits = self.speech_head(hidden_states)
+
+                input_ids = (
+                    generated_speech_tokens[:, :generated_length]
+                    if optimize_loop
+                    else torch.cat(generated_speech_tokens, dim=1)
                 )
+                if compiled_logits is None:
+                    processed_logits = logits_processors(
+                        input_ids,
+                        speech_logits[:, -1, :],
+                    )
+                    probs = F.softmax(processed_logits, dim=-1)
+                else:
+                    processed_logits, probs = compiled_logits(
+                        input_ids,
+                        speech_logits[:, -1, :],
+                    )
             if not optimize_sync and torch.all(processed_logits == -float("inf")):
                 print("Warning: All logits are -inf")
                 break

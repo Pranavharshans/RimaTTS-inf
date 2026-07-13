@@ -63,6 +63,17 @@ class TurboOptimizedApiTest(unittest.TestCase):
         self.assertTrue(kwargs["compile_logits"])
         self.assertFalse(kwargs["custom_decode"])
 
+    def test_native_step_option_reaches_turbo_t3(self):
+        self.model.generate(
+            "native step API test",
+            t3_compile_native_step=True,
+        )
+
+        kwargs = self.model.t3.inference_turbo.call_args.kwargs
+        self.assertTrue(kwargs["compile_native_step"])
+        self.assertFalse(kwargs["compile_native_decode"])
+        self.assertFalse(kwargs["compile_logits"])
+
     def test_dynamic_decode_options_reach_turbo_t3(self):
         self.model.generate(
             "dynamic decode API test",
