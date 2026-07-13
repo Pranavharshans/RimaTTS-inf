@@ -342,3 +342,27 @@ The profiler reports 287.56 ms total CUDA self-time. Efficient attention is
 fuses most cache growth into Triton kernels, so replacing DynamicCache storage
 is no longer the high-value target. The next attention experiment must retain
 contiguous dynamic K/V layout.
+
+### EXP-T010: contiguous dynamic BF16 AR attention
+
+- Implementation commit: `8ece468`.
+- Change: preserve untouched FP32 prefill, weights, QKV/MLP projections,
+  logits, sampling, S3Gen, and watermark. After the first sampled token, convert
+  only AR self-attention K/V to BF16, append with dynamic `torch.cat` so every
+  cache remains contiguous, cast Q to BF16 for SDPA, and compile the model-specific
+  decode with full graph and CUDA graphs disabled. Progress rendering is hidden.
+- Runs: two warmups and five measured runs per prompt.
+- Result: retained only as a long-sequence candidate; exact-output gate passed.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 515.54 +/- 2.85 | 21.94 +/- 0.03 | 403.23 +/- 2.75 | 95.15 +/- 0.34 | 2.720 | 0.1895 +/- 0.0010 | 65 | 161.21 +/- 1.10 | 2879.0 |
+| Medium | 1236.33 +/- 2.32 | 21.98 +/- 0.03 | 1080.73 +/- 2.63 | 112.48 +/- 0.69 | 7.360 | 0.1680 +/- 0.0003 | 181 | 167.48 +/- 0.41 | 2959.2 |
+| Long | 4222.88 +/- 40.23 | 22.62 +/- 0.04 | 3753.36 +/- 61.07 | 266.86 +/- 0.29 | 25.080 | 0.1684 +/- 0.0016 | 624 | 166.29 +/- 2.69 | 3522.1 |
+
+Every token and float-waveform tensor exactly matches EXP-T000 with maximum
+absolute audio difference `0.0`. Against EXP-T009, T3 is slower on short
+(`403.23` versus `385.49` ms) and medium (`1080.73` versus `1015.41` ms), but
+faster on long (`3753.36` versus `4160.13` ms). The BF16 conversion has a fixed
+cost and becomes worthwhile only after the attention sequence grows. EXP-T009
+remains the general recommended mode; EXP-T010 motivates a late-switch hybrid.
