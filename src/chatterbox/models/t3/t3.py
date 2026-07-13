@@ -691,6 +691,8 @@ class T3(nn.Module):
                 if dynamic_decoder_loaded:
                     hidden_states = dynamic_decoder(current_speech_embed)
                 elif custom_decoder is None:
+                    if native_compile_mode == "reduce-overhead":
+                        torch.compiler.cudagraph_mark_step_begin()
                     llm_outputs = native_decode(
                         inputs_embeds=current_speech_embed,
                         past_key_values=past_key_values,
