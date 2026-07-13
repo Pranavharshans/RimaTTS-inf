@@ -24,6 +24,7 @@ from .modules.cond_enc import T3CondEnc, T3Cond
 from .modules.t3_config import T3Config
 from .llama_configs import LLAMA_CONFIGS
 from .inference.t3_hf_backend import T3HuggingfaceBackend
+from .preallocated_cache import PreallocatedDynamicCache
 from ..utils import AttrDict
 
 
@@ -443,7 +444,7 @@ class T3(nn.Module):
     @torch.inference_mode()
     def inference_turbo(self, t3_cond, text_tokens, temperature=0.8, top_k=1000, top_p=0.95, repetition_penalty=1.2,
                         max_gen_len=1000, optimize_loop=False, optimize_sync=False,
-                        show_progress=True):
+                        preallocate_kv=False, show_progress=True):
 
         logits_processors = LogitsProcessorList()
         if temperature > 0 and temperature != 1.0:
@@ -472,9 +473,18 @@ class T3(nn.Module):
         else:
             generated_speech_tokens = []
 
+        past_key_values = (
+            PreallocatedDynamicCache(
+                config=self.tfmr.config,
+                max_cache_len=embeds.size(1) + max_gen_len,
+            )
+            if preallocate_kv
+            else None
+        )
         llm_outputs = self.tfmr(
             inputs_embeds=embeds,
-            use_cache=True
+            past_key_values=past_key_values,
+            use_cache=True,
         )
 
         hidden_states = llm_outputs[0]

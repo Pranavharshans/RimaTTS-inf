@@ -310,6 +310,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--optimize-t3-loop", action="store_true")
     parser.add_argument("--optimize-t3-sync", action="store_true")
+    parser.add_argument("--preallocate-t3-kv", action="store_true")
     parser.add_argument("--hide-progress", action="store_true")
     return parser.parse_args()
 
@@ -328,6 +329,7 @@ def main() -> None:
         **SAMPLING,
         "t3_optimize_loop": args.optimize_t3_loop,
         "t3_optimize_sync": args.optimize_t3_sync,
+        "t3_preallocate_kv": args.preallocate_t3_kv,
         "show_progress": not args.hide_progress,
     }
 
@@ -354,6 +356,7 @@ def main() -> None:
             "t3_matmul_precision": args.t3_matmul_precision,
             "optimize_t3_loop": args.optimize_t3_loop,
             "optimize_t3_sync": args.optimize_t3_sync,
+            "preallocate_t3_kv": args.preallocate_t3_kv,
             "show_progress": not args.hide_progress,
             "sampling": {**SAMPLING, "watermark": True, "s3gen_cfm_steps": 2},
             "conditioning": "checkpoint built-in voice",
