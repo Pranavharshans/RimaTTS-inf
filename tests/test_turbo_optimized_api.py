@@ -79,6 +79,18 @@ class TurboOptimizedApiTest(unittest.TestCase):
         self.assertFalse(kwargs["compile_native_decode"])
         self.assertFalse(kwargs["compile_logits"])
 
+    def test_native_cudagraph_window_reaches_turbo_t3(self):
+        self.model.generate(
+            "native CUDA graph API test",
+            t3_compile_native_decode=True,
+            t3_native_cudagraph_until=64,
+        )
+
+        kwargs = self.model.t3.inference_turbo.call_args.kwargs
+        self.assertTrue(kwargs["compile_native_decode"])
+        self.assertEqual(kwargs["native_cudagraph_until"], 64)
+        self.assertEqual(kwargs["native_compile_mode"], "default")
+
     def test_dynamic_decode_options_reach_turbo_t3(self):
         self.model.generate(
             "dynamic decode API test",

@@ -324,6 +324,7 @@ def parse_args() -> argparse.Namespace:
         choices=("default", "reduce-overhead", "max-autotune-no-cudagraphs"),
         default="default",
     )
+    parser.add_argument("--native-t3-cudagraph-until", type=int)
     parser.add_argument("--compile-native-t3-step", action="store_true")
     parser.add_argument("--dynamic-t3-decode", action="store_true")
     parser.add_argument(
@@ -358,6 +359,7 @@ def main() -> None:
         "t3_custom_compile": not args.custom_t3_eager,
         "t3_compile_native_decode": args.compile_native_t3_decode,
         "t3_native_compile_mode": args.native_t3_compile_mode,
+        "t3_native_cudagraph_until": args.native_t3_cudagraph_until,
         "t3_compile_native_step": args.compile_native_t3_step,
         "t3_dynamic_decode": args.dynamic_t3_decode,
         "t3_dynamic_cache_dtype": args.dynamic_t3_cache_dtype,
@@ -396,6 +398,7 @@ def main() -> None:
             "custom_t3_compile": not args.custom_t3_eager,
             "compile_native_t3_decode": args.compile_native_t3_decode,
             "native_t3_compile_mode": args.native_t3_compile_mode,
+            "native_t3_cudagraph_until": args.native_t3_cudagraph_until,
             "compile_native_t3_step": args.compile_native_t3_step,
             "dynamic_t3_decode": args.dynamic_t3_decode,
             "dynamic_t3_cache_dtype": args.dynamic_t3_cache_dtype,

@@ -455,6 +455,7 @@ class T3(nn.Module):
                         custom_cache_dtype="float32", custom_compile=True,
                         compile_native_decode=False,
                         native_compile_mode="default",
+                        native_cudagraph_until=None,
                         compile_native_step=False,
                         dynamic_decode=False, dynamic_cache_dtype="bfloat16",
                         dynamic_compile=True,
@@ -589,6 +590,7 @@ class T3(nn.Module):
         dynamic_decoder_loaded = False
         custom_cache_position = 0
         native_decode = self.tfmr.forward
+        cudagraph_decode = None
         selected_decode_modes = sum(
             (
                 custom_decode,
@@ -605,6 +607,17 @@ class T3(nn.Module):
             )
         if hybrid_decode_after is not None and hybrid_decode_after < 1:
             raise ValueError("hybrid_decode_after must be positive")
+        if native_cudagraph_until is not None:
+            if native_cudagraph_until < 1:
+                raise ValueError("native_cudagraph_until must be positive")
+            if not compile_native_decode:
+                raise ValueError(
+                    "native_cudagraph_until requires compile_native_decode"
+                )
+            if native_compile_mode != "default":
+                raise ValueError(
+                    "native_cudagraph_until manages its own compile modes"
+                )
         if native_compile_mode not in (
             "default",
             "reduce-overhead",
@@ -615,21 +628,31 @@ class T3(nn.Module):
                 "max-autotune-no-cudagraphs"
             )
         if compile_native_decode or hybrid_decode_after is not None:
-            compile_key = f"fullgraph_dynamic_{native_compile_mode}"
-            if compile_key not in self._turbo_native_decode_callables:
+            def get_native_decode(compile_mode):
+                compile_key = f"fullgraph_dynamic_{compile_mode}"
+                compiled_decode = self._turbo_native_decode_callables.get(
+                    compile_key
+                )
+                if compiled_decode is not None:
+                    return compiled_decode
                 compile_kwargs = {
                     "dynamic": True,
                     "fullgraph": True,
                 }
-                if native_compile_mode == "default":
+                if compile_mode == "default":
                     compile_kwargs["options"] = {"triton.cudagraphs": False}
                 else:
-                    compile_kwargs["mode"] = native_compile_mode
-                self._turbo_native_decode_callables[compile_key] = torch.compile(
+                    compile_kwargs["mode"] = compile_mode
+                compiled_decode = torch.compile(
                     self.tfmr.forward,
                     **compile_kwargs,
                 )
-            native_decode = self._turbo_native_decode_callables[compile_key]
+                self._turbo_native_decode_callables[compile_key] = compiled_decode
+                return compiled_decode
+
+            native_decode = get_native_decode(native_compile_mode)
+            if native_cudagraph_until is not None:
+                cudagraph_decode = get_native_decode("reduce-overhead")
         if custom_decode:
             required_cache_len = embeds.size(1) + max_gen_len
             decoder_key = (
@@ -691,16 +714,28 @@ class T3(nn.Module):
                 if dynamic_decoder_loaded:
                     hidden_states = dynamic_decoder(current_speech_embed)
                 elif custom_decoder is None:
-                    if native_compile_mode == "reduce-overhead":
+                    use_cudagraph = (
+                        native_compile_mode == "reduce-overhead"
+                        or (
+                            native_cudagraph_until is not None
+                            and decode_step < native_cudagraph_until
+                        )
+                    )
+                    decode_callable = (
+                        cudagraph_decode
+                        if cudagraph_decode is not None and use_cudagraph
+                        else native_decode
+                    )
+                    if use_cudagraph:
                         torch.compiler.cudagraph_mark_step_begin()
-                    llm_outputs = native_decode(
+                    llm_outputs = decode_callable(
                         inputs_embeds=current_speech_embed,
                         past_key_values=past_key_values,
                         use_cache=True
                     )
                     hidden_states = llm_outputs[0]
                     past_key_values = llm_outputs.past_key_values
-                    if native_compile_mode == "reduce-overhead":
+                    if use_cudagraph:
                         for layer in past_key_values.layers:
                             if layer.is_initialized:
                                 layer.keys = layer.keys.clone()
