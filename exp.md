@@ -386,3 +386,38 @@ distinct input size and reported at least nine shapes during warmup. The next
 gate is therefore not only throughput: medium and long runs must establish
 capture startup cost, graph count, and memory practicality before this path can
 replace EXP-009.
+
+#### EXP-010d: full CUDA-graph benchmark
+
+- Configuration: EXP-010c unchanged, with two warmups and five measured runs
+  for every prompt.
+- Result: retained as the current fastest implementation. Every speech-token
+  hash and final WAV file is exactly identical to EXP-000.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 1217.62 +/- 26.92 | 45.02 +/- 3.11 | 472.70 +/- 14.70 | 714.51 +/- 17.89 | 2.200 | 0.5535 +/- 0.0122 | 56 | 118.56 +/- 3.61 | 3164.4 |
+| Medium | 2203.27 +/- 36.21 | 45.13 +/- 3.51 | 1416.71 +/- 30.92 | 730.24 +/- 19.98 | 6.440 | 0.3421 +/- 0.0056 | 162 | 114.39 +/- 2.44 | 3243.8 |
+| Long | 6736.75 +/- 58.28 | 46.98 +/- 2.73 | 5589.07 +/- 49.30 | 1021.73 +/- 4.73 | 19.640 | 0.3430 +/- 0.0030 | 492 | 88.03 +/- 0.77 | 3503.0 |
+
+Compared with EXP-000, T3 time falls from 2009.22 ms to 472.70 ms on short,
+5876.48 ms to 1416.71 ms on medium, and 23701.25 ms to 5589.07 ms on long.
+End-to-end time falls from 2694.75 ms to 1217.62 ms, 6617.03 ms to 2203.27 ms,
+and 24876.00 ms to 6736.75 ms respectively. TTFT remains in the same practical
+range at 45.02-46.98 ms because the captured graph accelerates repeated decode,
+not conditioning and prefill.
+
+Final WAV equivalence:
+
+| Case | Baseline and EXP-010 SHA-256 | Equal samples | Max absolute difference |
+|---|---|---:|---:|
+| Short | `6a8dcd0eda8cf4b22c6c6bc798b52c2352fc509b2df360b39ead9c0cd83f0073` | Yes | 0.0 |
+| Medium | `2499b840f7f352b9139f492fb2edeffbc7d7e14a6994c3fa94e0925c6f9459f4` | Yes | 0.0 |
+| Long | `547146b2b8784bec379f7e72c2f28168a51638cc6437fe1cf2d3b187dc283b7c` | Yes | 0.0 |
+
+CUDA graphs are process-memory state: the first request for each unseen cache
+length records a new graph. The benchmark excludes compilation and capture in
+its two warmups. NVIDIA process memory reached approximately 6.4 GiB while the
+long graph set was being captured; measured PyTorch peak allocation remained
+3.16-3.50 GiB. Production integration therefore needs an explicit warmup API
+and must document the startup/capture tradeoff.
