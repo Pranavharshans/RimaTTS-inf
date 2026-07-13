@@ -25,7 +25,7 @@ from .modules.t3_config import T3Config
 from .llama_configs import LLAMA_CONFIGS
 from .inference.t3_hf_backend import T3HuggingfaceBackend
 from .preallocated_cache import PreallocatedDynamicCache
-from .turbo_gpt2_decode import TurboGPT2Decoder
+from .turbo_gpt2_decode import TurboGPT2Decoder, TurboGPT2DynamicDecoder
 from ..utils import AttrDict
 
 
@@ -91,6 +91,7 @@ class T3(nn.Module):
         self._compile_rotary_disabled = False
         self._turbo_custom_decoders = {}
         self._turbo_native_decode_callables = {}
+        self._turbo_dynamic_decoders = {}
 
     @property
     def device(self):
@@ -450,6 +451,8 @@ class T3(nn.Module):
                         preallocate_kv=False, custom_decode=False,
                         custom_cache_dtype="float32", custom_compile=True,
                         compile_native_decode=False,
+                        dynamic_decode=False, dynamic_cache_dtype="bfloat16",
+                        dynamic_compile=True,
                         show_progress=True):
 
         logits_processors = LogitsProcessorList()
@@ -513,10 +516,16 @@ class T3(nn.Module):
         current_speech_token = next_speech_token
 
         custom_decoder = None
+        dynamic_decoder = None
         custom_cache_position = 0
         native_decode = self.tfmr.forward
-        if custom_decode and compile_native_decode:
-            raise ValueError("custom_decode and compile_native_decode are mutually exclusive")
+        selected_decode_modes = sum(
+            (custom_decode, compile_native_decode, dynamic_decode)
+        )
+        if selected_decode_modes > 1:
+            raise ValueError(
+                "custom_decode, compile_native_decode, and dynamic_decode are mutually exclusive"
+            )
         if compile_native_decode:
             compile_key = "fullgraph_dynamic_no_cudagraphs"
             if compile_key not in self._turbo_native_decode_callables:
@@ -548,12 +557,25 @@ class T3(nn.Module):
                 )
                 self._turbo_custom_decoders[decoder_key] = custom_decoder
             custom_cache_position = custom_decoder.load_cache(past_key_values)
+        if dynamic_decode:
+            decoder_key = (dynamic_cache_dtype, dynamic_compile)
+            dynamic_decoder = self._turbo_dynamic_decoders.get(decoder_key)
+            if dynamic_decoder is None:
+                dynamic_decoder = TurboGPT2DynamicDecoder(
+                    self.tfmr,
+                    cache_dtype=dynamic_cache_dtype,
+                    compile_decode=dynamic_compile,
+                )
+                self._turbo_dynamic_decoders[decoder_key] = dynamic_decoder
+            dynamic_decoder.load_cache(past_key_values)
 
         stopped_on_eos = False
         for _ in tqdm(range(max_gen_len), disable=not show_progress):
             current_speech_embed = self.speech_emb(current_speech_token)
 
-            if custom_decoder is None:
+            if dynamic_decoder is not None:
+                hidden_states = dynamic_decoder(current_speech_embed)
+            elif custom_decoder is None:
                 llm_outputs = native_decode(
                     inputs_embeds=current_speech_embed,
                     past_key_values=past_key_values,

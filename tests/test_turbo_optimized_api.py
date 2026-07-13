@@ -35,6 +35,7 @@ class TurboOptimizedApiTest(unittest.TestCase):
             t3_custom_decode=True,
             t3_custom_cache_dtype="bfloat16",
             t3_custom_compile=False,
+            t3_dynamic_decode=False,
             show_progress=False,
         )
 
@@ -46,6 +47,7 @@ class TurboOptimizedApiTest(unittest.TestCase):
         self.assertEqual(kwargs["custom_cache_dtype"], "bfloat16")
         self.assertFalse(kwargs["custom_compile"])
         self.assertFalse(kwargs["compile_native_decode"])
+        self.assertFalse(kwargs["dynamic_decode"])
         self.assertFalse(kwargs["show_progress"])
         self.assertEqual(tuple(wav.shape), (1, 16))
 
@@ -58,6 +60,21 @@ class TurboOptimizedApiTest(unittest.TestCase):
         kwargs = self.model.t3.inference_turbo.call_args.kwargs
         self.assertTrue(kwargs["compile_native_decode"])
         self.assertFalse(kwargs["custom_decode"])
+
+    def test_dynamic_decode_options_reach_turbo_t3(self):
+        self.model.generate(
+            "dynamic decode API test",
+            t3_dynamic_decode=True,
+            t3_dynamic_cache_dtype="float32",
+            t3_dynamic_compile=False,
+        )
+
+        kwargs = self.model.t3.inference_turbo.call_args.kwargs
+        self.assertTrue(kwargs["dynamic_decode"])
+        self.assertEqual(kwargs["dynamic_cache_dtype"], "float32")
+        self.assertFalse(kwargs["dynamic_compile"])
+        self.assertFalse(kwargs["custom_decode"])
+        self.assertFalse(kwargs["compile_native_decode"])
 
 
 if __name__ == "__main__":

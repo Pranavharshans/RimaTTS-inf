@@ -3,7 +3,10 @@ import unittest
 import torch
 from transformers import GPT2Config, GPT2Model
 
-from chatterbox.models.t3.turbo_gpt2_decode import TurboGPT2Decoder
+from chatterbox.models.t3.turbo_gpt2_decode import (
+    TurboGPT2Decoder,
+    TurboGPT2DynamicDecoder,
+)
 
 
 class TurboGPT2DecoderTest(unittest.TestCase):
@@ -41,6 +44,40 @@ class TurboGPT2DecoderTest(unittest.TestCase):
         actual = decoder(next_embed, cache_position)
 
         torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-6)
+
+    def test_eager_dynamic_fp32_decode_matches_transformers(self):
+        torch.manual_seed(11)
+        config = GPT2Config(
+            vocab_size=16,
+            n_positions=16,
+            n_embd=16,
+            n_layer=2,
+            n_head=2,
+            attn_pdrop=0.0,
+            embd_pdrop=0.0,
+            resid_pdrop=0.0,
+            attn_implementation="sdpa",
+        )
+        transformer = GPT2Model(config).eval()
+        prefill_embeds = torch.randn(1, 3, config.n_embd)
+        next_embed = torch.randn(1, 1, config.n_embd)
+
+        prefill = transformer(inputs_embeds=prefill_embeds, use_cache=True)
+        decoder = TurboGPT2DynamicDecoder(
+            transformer,
+            cache_dtype="float32",
+            compile_decode=False,
+        )
+        decoder.load_cache(prefill.past_key_values)
+        expected = transformer(
+            inputs_embeds=next_embed,
+            past_key_values=prefill.past_key_values,
+            use_cache=True,
+        ).last_hidden_state
+        actual = decoder(next_embed)
+
+        torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-6)
+        self.assertTrue(all(cache.is_contiguous() for cache in decoder.key_cache))
 
 
 if __name__ == "__main__":
