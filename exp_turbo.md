@@ -266,3 +266,25 @@ the untouched baseline's 638.59/1730.28/5947.03 ms. The fixed cache cuts element
 size in half but retains a padded head stride, and the Q/K/V casts plus inefficient
 attention layout outweigh the saved bandwidth. This mode is not part of the
 recommended path.
+
+### EXP-T008: full-graph BF16 AR attention and KV cache
+
+- Implementation commits: `c4a0dce`, `aa46c2e`.
+- Change: combine the model-specific full-graph decoder from EXP-T006 with the
+  selective BF16 AR self-attention/cache configuration from EXP-T007. Weights,
+  QKV/MLP projections, logits, conditioning, S3Gen, and watermark remain FP32.
+  CUDA graphs and TF32 are disabled. Progress rendering is hidden.
+- Runs: two warmups and five measured runs per prompt.
+- Result: rejected for performance; exact-output quality gate passed.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 2390.52 +/- 8.02 | 22.42 +/- 0.15 | 2277.82 +/- 8.26 | 94.08 +/- 1.31 | 2.720 | 0.8789 +/- 0.0029 | 65 | 28.54 +/- 0.10 | 3278.5 |
+| Medium | 6560.71 +/- 14.50 | 22.36 +/- 0.12 | 6404.37 +/- 13.29 | 114.79 +/- 2.45 | 7.360 | 0.8914 +/- 0.0020 | 181 | 28.26 +/- 0.06 | 3280.3 |
+| Long | 22873.99 +/- 27.80 | 27.80 +/- 10.97 | 22390.87 +/- 11.44 | 273.03 +/- 0.26 | 25.080 | 0.9120 +/- 0.0011 | 624 | 27.87 +/- 0.01 | 3610.5 |
+
+Every token and float-waveform tensor exactly matches EXP-T000 with maximum
+absolute audio difference `0.0`. Selective BF16 improves the rejected compiled
+FP32 path slightly, but it remains about four times slower than the untouched
+native decoder. The compiler still lowers dynamic-prefix attention inefficiently,
+so this mode is not part of the recommended path.
