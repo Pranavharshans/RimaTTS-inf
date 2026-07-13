@@ -550,3 +550,22 @@ four are 5374.17-5394.63 ms. These post-warmup outliers make both means slower
 than EXP-011. Long peak allocation also rises from 3503.0 MiB to 3850.5 MiB.
 The small steady-state median improvement does not justify less predictable
 latency or the larger buffer, so the per-layer clone implementation is restored.
+
+### EXP-015: compile default RoPE into the decode graph
+
+- Experimental implementation commit: `b3b1074`.
+- Change: for the regular model's default RoPE type, bind the undecorated
+  `LlamaRotaryEmbedding.forward` during compilation. The removed decorator only
+  updates frequencies for dynamic and long RoPE types; all numerical operations
+  in the default forward remain identical.
+- Workload: short CUDA-graph smoke benchmark with EXP-011 settings.
+- Result: failed during the first compile warmup; no metrics or output tokens
+  were produced.
+
+AOTAutograd raises an `UntypedStorage` weak-reference error while tracing
+`self.inv_freq[None, :, None]`. This proves the dynamic-RoPE decorator is not the
+root cause: the compiler cannot functionalize this non-persistent module buffer
+when it is indexed inside the graph. The next attempt will expose the same
+tensor as a frozen parameter only for the compiled runtime path, which uses
+AOTAutograd's supported parameter-input mechanism without changing values or
+operations.
