@@ -771,3 +771,22 @@ Tokens and waveform exactly match EXP-T000 with maximum absolute audio
 difference `0.0`. Packing improves the earlier 64-step result from `4135.26`
 to `4119.09` ms T3, but it remains slower than EXP-T021's five-run `4088.59`
 ms mean. A 32-step crossover check follows; the 64-step window is not retained.
+
+### EXP-T030: packed 32-step CUDA graph window
+
+- Implementation commits: `d07a22e`, `f47a588`.
+- Change: halve EXP-T029's packed CUDA graph replay window from 64 to 32 decode
+  iterations, then use EXP-T021 for the remaining long decode.
+- Qualification: two warmups and one measured canonical long run.
+- Result: rejected for performance; exact-output gate passed.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Long | 4578.71 | 22.75 | 4116.08 | 268.88 | 25.080 | 0.1826 | 624 | 151.60 | 3419.1 |
+
+Tokens and waveform exactly match EXP-T000 with maximum absolute audio
+difference `0.0`. The 32-step result is effectively tied with the rejected
+64-step result (`4119.09` ms) and remains slower than EXP-T021 (`4088.59` ms).
+Further window reduction leaves less replay work than benchmark variance, so
+dynamic-shape CUDA graphs are closed as a general optimization on this cache.
+EXP-T028 remains useful only as a short-request diagnostic.
