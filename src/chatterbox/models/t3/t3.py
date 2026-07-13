@@ -348,6 +348,13 @@ class T3(nn.Module):
             rotary_mode = "compiled" if compile_rope else "eager"
             if self._compile_rotary_mode != rotary_mode:
                 if compile_rope:
+                    if "inv_freq" in self.tfmr.rotary_emb._buffers:
+                        inv_freq = self.tfmr.rotary_emb.inv_freq
+                        del self.tfmr.rotary_emb.inv_freq
+                        self.tfmr.rotary_emb.register_parameter(
+                            "inv_freq",
+                            nn.Parameter(inv_freq, requires_grad=False),
+                        )
                     rotary_forward = type(self.tfmr.rotary_emb).forward
                     while hasattr(rotary_forward, "__wrapped__"):
                         rotary_forward = rotary_forward.__wrapped__
