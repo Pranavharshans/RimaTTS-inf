@@ -667,3 +667,23 @@ after several candidates exceeded the RTX 3090's register/resource limit. The
 selected schedule is slower than EXP-T021 on both short (`388.46` versus
 `375.18` ms T3) and long (`4347.18` versus `4088.59` ms), so default Inductor
 code generation remains preferred.
+
+### EXP-T025: fixed token-history buffer with compiled logits
+
+- Implementation commits: `7040c31`, `955849a`.
+- Change: add the existing fixed generated-token buffer to EXP-T021 so the
+  compiled repetition-penalty graph receives a growing view instead of a fresh
+  `torch.cat` allocation each decode iteration. Transformer math, FP32 cache,
+  sampling order, S3Gen, and watermark are unchanged.
+- Qualification: one warmup and one measured canonical long run.
+- Result: rejected for performance; exact-output gate passed.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Long | 4586.70 | 22.57 | 4101.36 | 268.60 | 25.080 | 0.1829 | 624 | 152.14 | 3419.0 |
+
+Tokens and waveform exactly match EXP-T000 with maximum absolute audio
+difference `0.0`. EXP-T021's five-run long means are `4088.59` ms T3 and
+`152.62` tokens/s, so the fixed buffer does not improve the compiled path.
+The view's dynamic extent offsets the small allocation saving; no full suite
+was run after the canonical long endpoint regressed.
