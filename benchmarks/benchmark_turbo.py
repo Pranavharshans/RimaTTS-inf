@@ -335,6 +335,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dynamic-t3-eager", action="store_true")
     parser.add_argument("--hybrid-t3-after-tokens", type=int)
     parser.add_argument("--compile-t3-logits", action="store_true")
+    parser.add_argument("--compact-t3-logits", action="store_true")
     parser.add_argument("--hide-progress", action="store_true")
     return parser.parse_args()
 
@@ -366,6 +367,7 @@ def main() -> None:
         "t3_dynamic_compile": not args.dynamic_t3_eager,
         "t3_hybrid_decode_after": args.hybrid_t3_after_tokens,
         "t3_compile_logits": args.compile_t3_logits,
+        "t3_compact_logits": args.compact_t3_logits,
         "show_progress": not args.hide_progress,
     }
 
@@ -405,6 +407,7 @@ def main() -> None:
             "dynamic_t3_compile": not args.dynamic_t3_eager,
             "hybrid_t3_after_tokens": args.hybrid_t3_after_tokens,
             "compile_t3_logits": args.compile_t3_logits,
+            "compact_t3_logits": args.compact_t3_logits,
             "show_progress": not args.hide_progress,
             "sampling": {**SAMPLING, "watermark": True, "s3gen_cfm_steps": 2},
             "conditioning": "checkpoint built-in voice",

@@ -57,6 +57,7 @@ class TurboOptimizedApiTest(unittest.TestCase):
             t3_compile_native_decode=True,
             t3_native_compile_mode="max-autotune-no-cudagraphs",
             t3_compile_logits=True,
+            t3_compact_logits=True,
         )
 
         kwargs = self.model.t3.inference_turbo.call_args.kwargs
@@ -66,6 +67,7 @@ class TurboOptimizedApiTest(unittest.TestCase):
             "max-autotune-no-cudagraphs",
         )
         self.assertTrue(kwargs["compile_logits"])
+        self.assertTrue(kwargs["compact_logits"])
         self.assertFalse(kwargs["custom_decode"])
 
     def test_native_step_option_reaches_turbo_t3(self):

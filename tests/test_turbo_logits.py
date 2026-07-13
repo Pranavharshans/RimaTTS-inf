@@ -40,6 +40,17 @@ class TurboLogitsProcessorTest(unittest.TestCase):
         self.assertTrue(torch.equal(actual, reference))
         self.assertTrue(torch.equal(actual_probs, expected_probs))
 
+        compact, compact_probs = TurboLogitsProcessor(
+            temperature=0.8,
+            top_k=20,
+            top_p=0.95,
+            repetition_penalty=1.2,
+            compact_topk_topp=True,
+        )(input_ids, scores.clone())
+
+        self.assertTrue(torch.equal(compact, reference))
+        self.assertTrue(torch.equal(compact_probs, expected_probs))
+
 
 if __name__ == "__main__":
     unittest.main()

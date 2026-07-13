@@ -13,12 +13,14 @@ class TurboLogitsProcessor(nn.Module):
         top_k: int,
         top_p: float,
         repetition_penalty: float,
+        compact_topk_topp: bool = False,
     ):
         super().__init__()
         self.temperature = temperature
         self.top_k = top_k
         self.top_p = top_p
         self.repetition_penalty = repetition_penalty
+        self.compact_topk_topp = compact_topk_topp
 
     def forward(
         self,
@@ -28,12 +30,36 @@ class TurboLogitsProcessor(nn.Module):
         if self.temperature > 0 and self.temperature != 1.0:
             scores = scores / self.temperature
 
-        if self.top_k > 0:
+        use_compact_topk_topp = (
+            self.compact_topk_topp and self.top_k > 0 and self.top_p < 1.0
+        )
+        if use_compact_topk_topp:
+            top_k = min(self.top_k, scores.size(-1))
+            top_scores, top_indices = torch.topk(scores, top_k)
+            ascending_scores = top_scores.flip(-1)
+            padding = scores.new_full(
+                (*scores.shape[:-1], scores.size(-1) - top_k),
+                -float("inf"),
+            )
+            sorted_logits = torch.cat((padding, ascending_scores), dim=-1)
+            cumulative_probs = sorted_logits.softmax(dim=-1).cumsum(dim=-1)
+            remove_ascending = cumulative_probs[..., -top_k:] <= (1 - self.top_p)
+            remove_ascending[..., -1:] = False
+            filtered_top_scores = top_scores.masked_fill(
+                remove_ascending.flip(-1),
+                -float("inf"),
+            )
+            scores = torch.full_like(scores, -float("inf")).scatter(
+                1,
+                top_indices,
+                filtered_top_scores,
+            )
+        elif self.top_k > 0:
             top_k = min(self.top_k, scores.size(-1))
             threshold = torch.topk(scores, top_k)[0][..., -1, None]
             scores = scores.masked_fill(scores < threshold, -float("inf"))
 
-        if self.top_p < 1.0:
+        if self.top_p < 1.0 and not use_compact_topk_topp:
             sorted_logits, sorted_indices = torch.sort(scores, descending=False)
             cumulative_probs = sorted_logits.softmax(dim=-1).cumsum(dim=-1)
             sorted_indices_to_remove = cumulative_probs <= (1 - self.top_p)

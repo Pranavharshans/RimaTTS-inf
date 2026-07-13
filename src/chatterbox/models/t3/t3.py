@@ -476,6 +476,7 @@ class T3(nn.Module):
                         dynamic_compile=True,
                         hybrid_decode_after=None,
                         compile_logits=False,
+                        compact_logits=False,
                         show_progress=True):
 
         logits_processors = LogitsProcessorList()
@@ -490,7 +491,13 @@ class T3(nn.Module):
 
         compiled_logits = None
         if compile_logits:
-            logits_key = (temperature, top_k, top_p, repetition_penalty)
+            logits_key = (
+                temperature,
+                top_k,
+                top_p,
+                repetition_penalty,
+                compact_logits,
+            )
             compiled_logits = self._turbo_logits_callables.get(logits_key)
             if compiled_logits is None:
                 compiled_logits = torch.compile(
@@ -499,6 +506,7 @@ class T3(nn.Module):
                         top_k=top_k,
                         top_p=top_p,
                         repetition_penalty=repetition_penalty,
+                        compact_topk_topp=compact_logits,
                     ),
                     dynamic=True,
                     fullgraph=True,
@@ -512,7 +520,13 @@ class T3(nn.Module):
                 raise ValueError(
                     "compile_native_step already includes logits processing"
                 )
-            step_key = (temperature, top_k, top_p, repetition_penalty)
+            step_key = (
+                temperature,
+                top_k,
+                top_p,
+                repetition_penalty,
+                compact_logits,
+            )
             native_step = self._turbo_native_step_callables.get(step_key)
             if native_step is None:
                 step_logits = TurboLogitsProcessor(
@@ -520,6 +534,7 @@ class T3(nn.Module):
                     top_k=top_k,
                     top_p=top_p,
                     repetition_penalty=repetition_penalty,
+                    compact_topk_topp=compact_logits,
                 )
 
                 def native_step_fn(current_token, input_ids, past_key_values):
@@ -619,6 +634,10 @@ class T3(nn.Module):
             raise ValueError(
                 "custom_decode, compile_native_decode, compile_native_step, "
                 "dynamic_decode, and hybrid_decode_after are mutually exclusive"
+            )
+        if compact_logits and not (compile_logits or compile_native_step):
+            raise ValueError(
+                "compact_logits requires compile_logits or compile_native_step"
             )
         if hybrid_decode_after is not None and hybrid_decode_after < 1:
             raise ValueError("hybrid_decode_after must be positive")
