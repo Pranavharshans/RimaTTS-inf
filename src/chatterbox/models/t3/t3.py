@@ -429,10 +429,16 @@ class T3(nn.Module):
                 # Update the kv_cache.
                 past = output.past_key_values
                 if compile_decode and compile_mode == "reduce-overhead":
-                    for layer in past.layers:
-                        if layer.is_initialized:
-                            layer.keys = layer.keys.clone()
-                            layer.values = layer.values.clone()
+                    initialized_layers = [layer for layer in past.layers if layer.is_initialized]
+                    cache_tensors = [
+                        tensor
+                        for layer in initialized_layers
+                        for tensor in (layer.keys, layer.values)
+                    ]
+                    cache_views = torch.stack(cache_tensors).unbind(0)
+                    for layer_index, layer in enumerate(initialized_layers):
+                        layer.keys = cache_views[2 * layer_index]
+                        layer.values = cache_views[2 * layer_index + 1]
         finally:
             if original_matmul_precision is not None:
                 torch.set_float32_matmul_precision(original_matmul_precision)
