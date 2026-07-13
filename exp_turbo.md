@@ -148,3 +148,26 @@ stable short and medium TTFT values, but complete T3 time regresses from
 638.59/1730.28/5947.03 ms to 646.48/1765.28/6025.69 ms. The batch-one decode
 is dominated by narrow GEMV-like operations that do not receive the regular
 model's TF32 benefit, so this mode is not retained.
+
+### EXP-T003: fixed generated-token buffer and hidden progress
+
+- Implementation commit: `7040c31`.
+- Change: opt-in fixed-size storage for sampled token IDs instead of rebuilding
+  them with a list-wide `torch.cat` each step; disable T3's `tqdm` rendering.
+  Transformer execution, KV cache, sampling processors, S3Gen, and watermark
+  are unchanged. Upstream behavior remains the public default.
+- Runs: two warmups and five measured runs per prompt.
+- Result: rejected for performance; exact-output quality gate passed.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 760.45 +/- 5.90 | 21.93 +/- 0.08 | 650.51 +/- 4.64 | 95.12 +/- 1.13 | 2.720 | 0.2796 +/- 0.0022 | 65 | 99.93 +/- 0.71 | 2824.9 |
+| Medium | 1942.51 +/- 39.70 | 22.12 +/- 0.13 | 1781.33 +/- 18.43 | 123.23 +/- 21.96 | 7.360 | 0.2639 +/- 0.0054 | 181 | 101.62 +/- 1.04 | 2900.5 |
+| Long | 6398.62 +/- 161.44 | 22.76 +/- 0.12 | 5950.07 +/- 165.07 | 268.77 +/- 0.52 | 25.080 | 0.2551 +/- 0.0064 | 624 | 104.94 +/- 2.81 | 3419.1 |
+
+Every token and float-waveform tensor exactly matches EXP-T000 with maximum
+absolute audio difference `0.0`. The optimization removes only about 65 of the
+3,237 traced concatenations; 3,120 come from K/V growth inside the 24
+transformer layers. Short and medium regress, and long is statistically flat.
+The opt-in implementation is retained only for reproducibility and is not part
+of the recommended path.
