@@ -15,7 +15,6 @@ import torch.nn.functional as F
 from torch.profiler import ProfilerActivity, profile
 
 from chatterbox.tts import ChatterboxTTS, punc_norm
-import chatterbox.models.t3.t3 as t3_module
 
 
 DEFAULT_TEXT = "Hello, this is a short latency test."
@@ -25,6 +24,7 @@ INTERESTING_OPS = (
     "attention",
     "aten::cat",
     "aten::copy",
+    "aten::clone",
     "aten::_to_copy",
     "aten::to",
     "aten::contiguous",
@@ -34,6 +34,8 @@ INTERESTING_OPS = (
     "aten::matmul",
     "aten::multinomial",
     "aten::softmax",
+    "cudaGraph",
+    "triton",
 )
 
 
@@ -112,6 +114,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=Path("benchmark_results/profile_baseline"))
     parser.add_argument("--seed", type=int, default=20260713)
     parser.add_argument("--profile-memory", action="store_true")
+    parser.add_argument("--warmups", type=int, default=1)
+    parser.add_argument("--compile-decode", action="store_true")
+    parser.add_argument(
+        "--compile-mode",
+        choices=("default", "reduce-overhead", "max-autotune-no-cudagraphs"),
+        default="default",
+    )
+    parser.add_argument(
+        "--matmul-precision",
+        choices=("highest", "high"),
+        default="highest",
+    )
     return parser.parse_args()
 
 
@@ -120,8 +134,6 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     model = ChatterboxTTS.from_pretrained(device="cuda")
     text_tokens = prepare_text(model, args.text)
-    t3_module.tqdm = lambda iterable, *unused_args, **unused_kwargs: iterable
-
     cache_snapshots: list[dict[str, Any]] = []
     original_forward = model.t3.tfmr.forward
     forward_calls = 0
@@ -143,10 +155,11 @@ def main() -> None:
             )
         return output
 
-    model.t3.tfmr.forward = capture_forward
-    try:
-        torch.manual_seed(args.seed)
-        model.t3.inference(
+    if not args.compile_decode:
+        model.t3.tfmr.forward = capture_forward
+
+    def run_t3() -> torch.Tensor:
+        return model.t3.inference(
             t3_cond=model.conds.t3,
             text_tokens=text_tokens,
             max_new_tokens=1000,
@@ -155,8 +168,18 @@ def main() -> None:
             min_p=0.05,
             repetition_penalty=1.2,
             cfg_weight=0.5,
+            compile_decode=args.compile_decode,
+            compile_mode=args.compile_mode,
+            show_progress=False,
         )
-        torch.cuda.synchronize()
+
+    original_matmul_precision = torch.get_float32_matmul_precision()
+    torch.set_float32_matmul_precision(args.matmul_precision)
+    try:
+        for _ in range(args.warmups):
+            torch.manual_seed(args.seed)
+            run_t3()
+            torch.cuda.synchronize()
 
         cache_snapshots.clear()
         forward_calls = 0
@@ -167,19 +190,12 @@ def main() -> None:
             profile_memory=args.profile_memory,
             with_stack=False,
         ) as profiler:
-            tokens = model.t3.inference(
-                t3_cond=model.conds.t3,
-                text_tokens=text_tokens,
-                max_new_tokens=1000,
-                temperature=0.8,
-                top_p=1.0,
-                min_p=0.05,
-                repetition_penalty=1.2,
-                cfg_weight=0.5,
-            )
+            tokens = run_t3()
             torch.cuda.synchronize()
     finally:
-        model.t3.tfmr.forward = original_forward
+        if not args.compile_decode:
+            model.t3.tfmr.forward = original_forward
+        torch.set_float32_matmul_precision(original_matmul_precision)
 
     events = profiler.key_averages()
     selected = []
@@ -200,6 +216,12 @@ def main() -> None:
 
     payload = {
         "generated_tokens": int(tokens.shape[-1]),
+        "configuration": {
+            "warmups": args.warmups,
+            "compile_decode": args.compile_decode,
+            "compile_mode": args.compile_mode,
+            "matmul_precision": args.matmul_precision,
+        },
         "token_sha256": hashlib.sha256(
             tokens.detach().cpu().to(torch.int64).contiguous().numpy().tobytes()
         ).hexdigest(),
