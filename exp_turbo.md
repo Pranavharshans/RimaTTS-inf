@@ -171,3 +171,26 @@ absolute audio difference `0.0`. The optimization removes only about 65 of the
 transformer layers. Short and medium regress, and long is statistically flat.
 The opt-in implementation is retained only for reproducibility and is not part
 of the recommended path.
+
+### EXP-T004: remove redundant decode synchronizations
+
+- Implementation commit: `633b52f`.
+- Change: opt-in path skips the per-token all-`-inf` guard for valid model
+  logits and uses a single scalar EOS read instead of an equality kernel plus
+  reduction. T3 weights, FP32 DynamicCache, transformer execution, sampling
+  processors, S3Gen, and watermark are unchanged. Progress rendering is hidden.
+- Runs: two warmups and five measured runs per prompt.
+- Result: rejected for performance; exact-output quality gate passed.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 758.69 +/- 5.98 | 22.17 +/- 0.05 | 646.06 +/- 6.08 | 95.98 +/- 0.50 | 2.720 | 0.2789 +/- 0.0022 | 65 | 100.62 +/- 0.95 | 2824.9 |
+| Medium | 1931.97 +/- 26.62 | 24.00 +/- 4.16 | 1777.32 +/- 28.05 | 113.57 +/- 1.50 | 7.360 | 0.2625 +/- 0.0036 | 181 | 101.86 +/- 1.59 | 2900.5 |
+| Long | 6498.42 +/- 17.51 | 27.25 +/- 10.08 | 6068.44 +/- 34.52 | 267.87 +/- 0.59 | 25.080 | 0.2591 +/- 0.0007 | 624 | 102.83 +/- 0.59 | 3419.0 |
+
+Every token and float-waveform tensor exactly matches EXP-T000 with maximum
+absolute audio difference `0.0`. T3 latency is 646.06/1777.32/6068.44 ms versus
+the untouched baseline's 638.59/1730.28/5947.03 ms. The remaining EOS scalar
+read still synchronizes each iteration; removing the earlier guard changes when
+the host waits but does not shorten the dependent GPU work. This mode is not
+part of the recommended path.
