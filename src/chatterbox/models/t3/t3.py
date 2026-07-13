@@ -36,18 +36,6 @@ def _ensure_BOT_EOT(text_tokens: Tensor, hp):
     assert (text_tokens == hp.stop_text_token).int().sum() >= B, "missing stop_text_token"
 
 
-def _compiled_default_rope_forward(rotary, x: Tensor, position_ids: Tensor):
-    inv_freq = rotary._compile_inv_freq_expanded
-    positions = position_ids[:, None, :].float()
-    device_type = x.device.type if x.device.type != "mps" else "cpu"
-    with torch.autocast(device_type=device_type, enabled=False):
-        freqs = (inv_freq.float() @ positions.float()).transpose(1, 2)
-        emb = torch.cat((freqs, freqs), dim=-1)
-        cos = emb.cos() * rotary.attention_scaling
-        sin = emb.sin() * rotary.attention_scaling
-    return cos.to(dtype=x.dtype), sin.to(dtype=x.dtype)
-
-
 class T3(nn.Module):
     """
     Token-To-Token (T3) TTS model using huggingface transformer models as backbones,
@@ -98,7 +86,7 @@ class T3(nn.Module):
         self.compiled = False
         self.patched_model = None
         self._compiled_decode_callables = {}
-        self._compile_rotary_mode = None
+        self._compile_rotary_disabled = False
 
     @property
     def device(self):
@@ -262,7 +250,7 @@ class T3(nn.Module):
         tf32_after_tokens: Optional[int] = None,
         compile_decode: bool = False,
         compile_mode: str = "default",
-        compile_rope: bool = False,
+        split_decode_core: bool = False,
         show_progress: bool = True,
     ):
         """
@@ -353,32 +341,26 @@ class T3(nn.Module):
         # Initialize kv_cache with the full context.
         past = output.past_key_values
         cfg = torch.as_tensor(cfg_weight, device=output.logits.device, dtype=output.logits.dtype)
-        compile_key = (compile_mode, compile_rope)
+        if split_decode_core and not compile_decode:
+            raise ValueError("split_decode_core requires compile_decode=True")
+        compile_key = (compile_mode, split_decode_core)
         if compile_decode and compile_key not in self._compiled_decode_callables:
             if compile_mode not in {"default", "reduce-overhead", "max-autotune-no-cudagraphs"}:
                 raise ValueError(f"Unsupported compile_mode: {compile_mode}")
-            rotary_mode = "compiled" if compile_rope else "eager"
-            if self._compile_rotary_mode != rotary_mode:
-                if compile_rope:
-                    if not hasattr(self.tfmr.rotary_emb, "_compile_inv_freq_expanded"):
-                        inv_freq = self.tfmr.rotary_emb.inv_freq[None, :, None].clone()
-                        self.tfmr.rotary_emb.register_parameter(
-                            "_compile_inv_freq_expanded",
-                            nn.Parameter(inv_freq, requires_grad=False),
-                        )
-                    self.tfmr.rotary_emb.forward = _compiled_default_rope_forward.__get__(
-                        self.tfmr.rotary_emb,
-                        type(self.tfmr.rotary_emb),
-                    )
-                else:
-                    self.tfmr.rotary_emb.forward = torch.compiler.disable(
-                        self.tfmr.rotary_emb.forward,
-                        recursive=False,
-                        reason="RoPE buffer capture is incompatible with dynamic T3 decode",
-                    )
-                self._compile_rotary_mode = rotary_mode
+            if not split_decode_core and not self._compile_rotary_disabled:
+                self.tfmr.rotary_emb.forward = torch.compiler.disable(
+                    self.tfmr.rotary_emb.forward,
+                    recursive=False,
+                    reason="RoPE buffer capture is incompatible with dynamic T3 decode",
+                )
+                self._compile_rotary_disabled = True
+            compile_target = (
+                self.patched_model.forward_decode_core
+                if split_decode_core
+                else self.patched_model.forward
+            )
             self._compiled_decode_callables[compile_key] = torch.compile(
-                self.patched_model.forward,
+                compile_target,
                 dynamic=True,
                 fullgraph=False,
                 mode=compile_mode,
@@ -443,16 +425,34 @@ class T3(nn.Module):
                 if tf32_after_tokens is not None and i + 1 == tf32_after_tokens:
                     torch.set_float32_matmul_precision("high")
 
+                if split_decode_core:
+                    (
+                        causal_mask,
+                        position_ids,
+                        cache_position,
+                        position_embeddings,
+                    ) = self.patched_model.prepare_decode_inputs(next_token_embed, past)
+
                 # Forward pass with only the new token and the cached past.
                 if compile_decode and compile_mode == "reduce-overhead":
                     torch.compiler.cudagraph_mark_step_begin()
-                output = decode_forward(
-                    inputs_embeds=next_token_embed,
-                    past_key_values=past,
-                    output_attentions=False,
-                    output_hidden_states=False,
-                    return_dict=True,
-                )
+                if split_decode_core:
+                    output = decode_forward(
+                        inputs_embeds=next_token_embed,
+                        past_key_values=past,
+                        causal_mask=causal_mask,
+                        position_ids=position_ids,
+                        cache_position=cache_position,
+                        position_embeddings=position_embeddings,
+                    )
+                else:
+                    output = decode_forward(
+                        inputs_embeds=next_token_embed,
+                        past_key_values=past,
+                        output_attentions=False,
+                        output_hidden_states=False,
+                        return_dict=True,
+                    )
                 # Update the kv_cache.
                 past = output.past_key_values
                 if compile_decode and compile_mode == "reduce-overhead":
