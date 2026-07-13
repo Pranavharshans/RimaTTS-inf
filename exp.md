@@ -615,3 +615,20 @@ The experimental parameter and custom RoPE mutations will be removed. The next
 model-specific path will reproduce the existing Llama forward boundary exactly:
 prepare causal mask and RoPE eagerly, then pass those ordinary output tensors
 to one compiled transformer-layer core.
+
+### EXP-016: split eager RoPE from compiled transformer core
+
+- Implementation commit: `292e57f`.
+- Change: reproduce the installed Llama forward boundary by preparing cache
+  position, causal mask, and standard RoPE eagerly, then compile the unchanged
+  30 decoder layers, final norm, and speech head as one explicit core.
+- Workload: short CUDA-graph smoke benchmark with EXP-011 settings.
+- Result: rejected and removed. The first compile warmup fails before producing
+  metrics or tokens.
+
+AOTAutograd again raises an `UntypedStorage` weak-reference error, this time at
+layer zero's Q-projection weight. The same weights compile successfully only
+when reached through Transformers' original model-forward segmentation. On this
+PyTorch 2.12/CUDA 13 runtime, extracting the nested layer core is therefore not
+a valid graph consolidation route. EXP-011's eager RoPE graph break remains the
+stable retained implementation.

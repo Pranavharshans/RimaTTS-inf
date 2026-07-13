@@ -3,7 +3,6 @@ from typing import Optional
 import torch
 from torch import nn as nn
 from transformers import LlamaConfig, LlamaModel, LlamaPreTrainedModel, GenerationMixin
-from transformers.masking_utils import create_causal_mask
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
 
@@ -108,50 +107,4 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
             past_key_values=tfmr_out.past_key_values,
             hidden_states=tfmr_out.hidden_states if output_hidden_states else None,
             attentions=tfmr_out.attentions,
-        )
-
-    @torch.inference_mode()
-    def prepare_decode_inputs(self, inputs_embeds, past_key_values):
-        past_seen_tokens = past_key_values.get_seq_length()
-        cache_position = (
-            torch.arange(inputs_embeds.shape[1], device=inputs_embeds.device) + past_seen_tokens
-        )
-        position_ids = cache_position.unsqueeze(0)
-        causal_mask = create_causal_mask(
-            config=self.model.config,
-            inputs_embeds=inputs_embeds,
-            attention_mask=None,
-            cache_position=cache_position,
-            past_key_values=past_key_values,
-            position_ids=position_ids,
-        )
-        position_embeddings = self.model.rotary_emb(inputs_embeds, position_ids=position_ids)
-        return causal_mask, position_ids, cache_position, position_embeddings
-
-    @torch.inference_mode()
-    def forward_decode_core(
-        self,
-        inputs_embeds,
-        past_key_values,
-        causal_mask,
-        position_ids,
-        cache_position,
-        position_embeddings,
-    ):
-        hidden_states = inputs_embeds
-        for decoder_layer in self.model.layers[: self.model.config.num_hidden_layers]:
-            hidden_states = decoder_layer(
-                hidden_states,
-                attention_mask=causal_mask,
-                position_embeddings=position_embeddings,
-                position_ids=position_ids,
-                past_key_values=past_key_values,
-                use_cache=True,
-                cache_position=cache_position,
-            )
-        hidden_states = self.model.norm(hidden_states)
-        logits = self.speech_head(hidden_states)
-        return CausalLMOutputWithCrossAttentions(
-            logits=logits,
-            past_key_values=past_key_values,
         )

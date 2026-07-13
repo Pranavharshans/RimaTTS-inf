@@ -250,7 +250,6 @@ class T3(nn.Module):
         tf32_after_tokens: Optional[int] = None,
         compile_decode: bool = False,
         compile_mode: str = "default",
-        split_decode_core: bool = False,
         show_progress: bool = True,
     ):
         """
@@ -341,32 +340,24 @@ class T3(nn.Module):
         # Initialize kv_cache with the full context.
         past = output.past_key_values
         cfg = torch.as_tensor(cfg_weight, device=output.logits.device, dtype=output.logits.dtype)
-        if split_decode_core and not compile_decode:
-            raise ValueError("split_decode_core requires compile_decode=True")
-        compile_key = (compile_mode, split_decode_core)
-        if compile_decode and compile_key not in self._compiled_decode_callables:
+        if compile_decode and compile_mode not in self._compiled_decode_callables:
             if compile_mode not in {"default", "reduce-overhead", "max-autotune-no-cudagraphs"}:
                 raise ValueError(f"Unsupported compile_mode: {compile_mode}")
-            if not split_decode_core and not self._compile_rotary_disabled:
+            if not self._compile_rotary_disabled:
                 self.tfmr.rotary_emb.forward = torch.compiler.disable(
                     self.tfmr.rotary_emb.forward,
                     recursive=False,
                     reason="RoPE buffer capture is incompatible with dynamic T3 decode",
                 )
                 self._compile_rotary_disabled = True
-            compile_target = (
-                self.patched_model.forward_decode_core
-                if split_decode_core
-                else self.patched_model.forward
-            )
-            self._compiled_decode_callables[compile_key] = torch.compile(
-                compile_target,
+            self._compiled_decode_callables[compile_mode] = torch.compile(
+                self.patched_model.forward,
                 dynamic=True,
                 fullgraph=False,
                 mode=compile_mode,
             )
         decode_forward = (
-            self._compiled_decode_callables[compile_key]
+            self._compiled_decode_callables[compile_mode]
             if compile_decode
             else self.patched_model.forward
         )
@@ -425,34 +416,16 @@ class T3(nn.Module):
                 if tf32_after_tokens is not None and i + 1 == tf32_after_tokens:
                     torch.set_float32_matmul_precision("high")
 
-                if split_decode_core:
-                    (
-                        causal_mask,
-                        position_ids,
-                        cache_position,
-                        position_embeddings,
-                    ) = self.patched_model.prepare_decode_inputs(next_token_embed, past)
-
                 # Forward pass with only the new token and the cached past.
                 if compile_decode and compile_mode == "reduce-overhead":
                     torch.compiler.cudagraph_mark_step_begin()
-                if split_decode_core:
-                    output = decode_forward(
-                        inputs_embeds=next_token_embed,
-                        past_key_values=past,
-                        causal_mask=causal_mask,
-                        position_ids=position_ids,
-                        cache_position=cache_position,
-                        position_embeddings=position_embeddings,
-                    )
-                else:
-                    output = decode_forward(
-                        inputs_embeds=next_token_embed,
-                        past_key_values=past,
-                        output_attentions=False,
-                        output_hidden_states=False,
-                        return_dict=True,
-                    )
+                output = decode_forward(
+                    inputs_embeds=next_token_embed,
+                    past_key_values=past,
+                    output_attentions=False,
+                    output_hidden_states=False,
+                    return_dict=True,
+                )
                 # Update the kv_cache.
                 past = output.past_key_values
                 if compile_decode and compile_mode == "reduce-overhead":

@@ -217,7 +217,6 @@ class ChatterboxTTS:
         temperature=0.8,
         compile_t3_decode=False,
         t3_compile_mode="default",
-        split_t3_decode_core=False,
         t3_matmul_precision=None,
         t3_tf32_after_tokens=None,
         show_progress=True,
@@ -268,7 +267,6 @@ class ChatterboxTTS:
                     top_p=top_p,
                     compile_decode=compile_t3_decode,
                     compile_mode=t3_compile_mode,
-                    split_decode_core=split_t3_decode_core,
                     tf32_after_tokens=t3_tf32_after_tokens,
                     show_progress=show_progress,
                 )
