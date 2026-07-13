@@ -509,3 +509,24 @@ The actionable overhead outside the graph is cache ownership: cloning 30 K and
 56-token request. The next experiment will copy those identically shaped
 tensors into one stacked contiguous allocation per step and assign contiguous
 views back to the cache, preserving values while collapsing dispatch count.
+
+### EXP-014: batched stacked K/V ownership copy
+
+- Implementation commit: `9d180a8`.
+- Change: replace 60 independent K/V `clone()` operations per generated token
+  with one `torch.stack()` allocation and one `unbind()` into contiguous layer
+  views. The copy still occurs outside the compiled graph and preserves the
+  graph-output lifetime fix from EXP-010.
+- Runs: two warmups and five measured short runs.
+- Result: successful exact-audio short benchmark; full evaluation pending.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 1109.68 +/- 25.16 | 39.25 +/- 2.40 | 440.88 +/- 16.13 | 642.82 +/- 20.28 | 2.200 | 0.5044 +/- 0.0114 | 56 | 127.15 +/- 4.49 | 3218.7 |
+
+The speech-token hash and final WAV hash exactly match EXP-000. Compared with
+EXP-011, short T3 falls from 448.17 ms to 440.88 ms and throughput rises from
+124.98 to 127.15 tokens/s. Peak allocation rises from 3164.4 MiB to
+3218.7 MiB because the stacked ownership buffer is live as the next graph
+input. Medium and long runs are required to determine whether the dispatch
+reduction continues to outweigh the larger contiguous copy.
