@@ -26,6 +26,7 @@ from .llama_configs import LLAMA_CONFIGS
 from .inference.t3_hf_backend import T3HuggingfaceBackend
 from .preallocated_cache import PreallocatedDynamicCache
 from .turbo_gpt2_decode import TurboGPT2Decoder, TurboGPT2DynamicDecoder
+from .turbo_logits import TurboLogitsProcessor
 from ..utils import AttrDict
 
 
@@ -92,6 +93,7 @@ class T3(nn.Module):
         self._turbo_custom_decoders = {}
         self._turbo_native_decode_callables = {}
         self._turbo_dynamic_decoders = {}
+        self._turbo_logits_callables = {}
 
     @property
     def device(self):
@@ -454,6 +456,7 @@ class T3(nn.Module):
                         dynamic_decode=False, dynamic_cache_dtype="bfloat16",
                         dynamic_compile=True,
                         hybrid_decode_after=None,
+                        compile_logits=False,
                         show_progress=True):
 
         logits_processors = LogitsProcessorList()
@@ -465,6 +468,24 @@ class T3(nn.Module):
             logits_processors.append(TopPLogitsWarper(top_p))
         if repetition_penalty != 1.0:
             logits_processors.append(RepetitionPenaltyLogitsProcessor(repetition_penalty))
+
+        compiled_logits = None
+        if compile_logits:
+            logits_key = (temperature, top_k, top_p, repetition_penalty)
+            compiled_logits = self._turbo_logits_callables.get(logits_key)
+            if compiled_logits is None:
+                compiled_logits = torch.compile(
+                    TurboLogitsProcessor(
+                        temperature=temperature,
+                        top_k=top_k,
+                        top_p=top_p,
+                        repetition_penalty=repetition_penalty,
+                    ),
+                    dynamic=True,
+                    fullgraph=True,
+                    options={"triton.cudagraphs": False},
+                )
+                self._turbo_logits_callables[logits_key] = compiled_logits
 
 
         speech_start_token = self.hp.start_speech_token * torch.ones_like(text_tokens[:, :1])
@@ -503,8 +524,17 @@ class T3(nn.Module):
         speech_hidden = hidden_states[:, -1:]
         speech_logits = self.speech_head(speech_hidden)
 
-        processed_logits = logits_processors(speech_start_token, speech_logits[:, -1, :])
-        probs = F.softmax(processed_logits, dim=-1)
+        if compiled_logits is None:
+            processed_logits = logits_processors(
+                speech_start_token,
+                speech_logits[:, -1, :],
+            )
+            probs = F.softmax(processed_logits, dim=-1)
+        else:
+            processed_logits, probs = compiled_logits(
+                speech_start_token,
+                speech_logits[:, -1, :],
+            )
         next_speech_token = torch.multinomial(probs, num_samples=1)
 
         if optimize_loop:
@@ -615,12 +645,21 @@ class T3(nn.Module):
                 if optimize_loop
                 else torch.cat(generated_speech_tokens, dim=1)
             )
-            processed_logits = logits_processors(input_ids, speech_logits[:, -1, :])
+            if compiled_logits is None:
+                processed_logits = logits_processors(
+                    input_ids,
+                    speech_logits[:, -1, :],
+                )
+                probs = F.softmax(processed_logits, dim=-1)
+            else:
+                processed_logits, probs = compiled_logits(
+                    input_ids,
+                    speech_logits[:, -1, :],
+                )
             if not optimize_sync and torch.all(processed_logits == -float("inf")):
                 print("Warning: All logits are -inf")
                 break
 
-            probs = F.softmax(processed_logits, dim=-1)
             next_speech_token = torch.multinomial(probs, num_samples=1)
 
             if optimize_loop:

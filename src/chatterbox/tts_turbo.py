@@ -268,6 +268,7 @@ class ChatterboxTurboTTS:
         t3_dynamic_cache_dtype="bfloat16",
         t3_dynamic_compile=True,
         t3_hybrid_decode_after=None,
+        t3_compile_logits=False,
         show_progress=True,
     ):
         if audio_prompt_path:
@@ -301,6 +302,7 @@ class ChatterboxTurboTTS:
             dynamic_cache_dtype=t3_dynamic_cache_dtype,
             dynamic_compile=t3_dynamic_compile,
             hybrid_decode_after=t3_hybrid_decode_after,
+            compile_logits=t3_compile_logits,
             show_progress=show_progress,
         )
 

@@ -55,10 +55,12 @@ class TurboOptimizedApiTest(unittest.TestCase):
         self.model.generate(
             "native compile API test",
             t3_compile_native_decode=True,
+            t3_compile_logits=True,
         )
 
         kwargs = self.model.t3.inference_turbo.call_args.kwargs
         self.assertTrue(kwargs["compile_native_decode"])
+        self.assertTrue(kwargs["compile_logits"])
         self.assertFalse(kwargs["custom_decode"])
 
     def test_dynamic_decode_options_reach_turbo_t3(self):
