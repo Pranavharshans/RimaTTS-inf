@@ -218,3 +218,28 @@ max-length `[B,H,T,D]` allocation keeps the maximum-length stride between heads;
 the resulting non-contiguous attention input costs more than the avoided K/V
 concatenations save. Preallocation also raises short-case peak allocation from
 2824.9 to 3012.3 MiB. This mode is not part of the recommended path.
+
+### EXP-T006: full-graph FP32 model-specific GPT-2 decode
+
+- Implementation commits: `c4a0dce`, `aa46c2e`.
+- Change: keep Transformers prefill unchanged, then copy its FP32 K/V values
+  into fixed buffers and run the 24 GPT-2 decode blocks through a model-specific
+  `torch.compile(fullgraph=True, dynamic=True)` callable. Positional embedding,
+  layer norms, QKV projection, SDPA, output projection, MLP, residual ordering,
+  logits processing, S3Gen, and watermark are preserved. CUDA graphs and TF32
+  are disabled. Progress rendering is hidden.
+- Runs: two warmups and five measured runs per prompt.
+- Result: rejected for performance; exact-output quality gate passed.
+
+| Case | E2E ms | T3 TTFT ms | T3 ms | S3Gen ms | Audio s | RTF | Tokens | Tok/s | Peak allocated MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Short | 2530.25 +/- 6.31 | 22.13 +/- 0.12 | 2418.56 +/- 7.60 | 96.33 +/- 1.62 | 2.720 | 0.9302 +/- 0.0023 | 65 | 26.88 +/- 0.08 | 3754.5 |
+| Medium | 6977.96 +/- 11.98 | 22.25 +/- 0.13 | 6822.89 +/- 8.62 | 114.73 +/- 0.78 | 7.360 | 0.9481 +/- 0.0016 | 181 | 26.53 +/- 0.03 | 3756.3 |
+| Long | 24924.85 +/- 24.08 | 27.71 +/- 10.90 | 24457.15 +/- 39.07 | 273.13 +/- 0.34 | 25.080 | 0.9938 +/- 0.0010 | 624 | 25.51 +/- 0.04 | 3802.2 |
+
+Every token and float-waveform tensor exactly matches EXP-T000 with maximum
+absolute audio difference `0.0`. The stable measured runs prove compile startup
+is excluded, but dynamic-prefix SDPA inside the monolithic compiled graph runs
+far less efficiently than the native eager CUTLASS path. Short T3 latency rises
+from 638.59 to 2418.56 ms and peak allocation rises from 2824.9 to 3754.5 MiB.
+This mode is not part of the recommended path.
